@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using System.Collections.Generic;
 
-public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerClickHandler
+public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerClickHandler, IPointerEnterHandler, IPointerExitHandler
 {
     [HideInInspector] public CardData cardData;
     [HideInInspector] public SpeedDiceSlot sourceSlot;
@@ -11,6 +11,7 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
     private CanvasGroup _canvasGroup;
     private Vector3 _originalScale;
 
+    private float hoverScaleMultiplier = 1.15f;
     private void Awake()
     {
         _originalScale = transform.localScale;
@@ -38,11 +39,23 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
         }
     }
 
+    public void OnPointerEnter(PointerEventData eventData)
+    {
+        if (eventData.dragging) return; // 拖曳中不放大
+        transform.localScale = _originalScale * hoverScaleMultiplier;
+    }
+
+    public void OnPointerExit(PointerEventData eventData)
+    {
+        if (eventData.dragging) return;
+        transform.localScale = _originalScale;
+    }
+
     public void OnBeginDrag(PointerEventData eventData)
     {
         if (_canvasGroup != null) _canvasGroup.blocksRaycasts = false;
         if (_canvas != null) transform.SetParent(_canvas.transform);
-        transform.localScale = _originalScale * 0.7f;
+        transform.localScale = _originalScale * 0.7f; // 拖曳時縮小
     }
 
     public void OnDrag(PointerEventData eventData) => transform.position = eventData.position;

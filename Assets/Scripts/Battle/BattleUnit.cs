@@ -8,6 +8,7 @@ public class BattleUnit : MonoBehaviour
     public string unitName = "未知單位";
     public int maxHP = 100;
     public int maxStagger = 50;
+    public bool isKeyTarget = false; // ★ 新增：是否為擊敗即勝利的關鍵目標
 
     [Header("戰鬥屬性")]
     public int speedDiceCount = 1;

@@ -1,13 +1,15 @@
 using UnityEngine;
 using System.Collections;
+using System.Collections.Generic; // ★ 新增
 
-/// <summary>
-/// 擴充版：加入第一關專用的「逃跑」機制。
-/// </summary>
 public class EnemyMarker : MonoBehaviour
 {
     public BattleUnit battleUnit;
     public float escapeSpeed = 8f;
+
+    [Header("群組戰鬥設定")]
+    [Tooltip("碰到此敵人時，會一起捲入戰鬥的同夥")]
+    public List<EnemyMarker> linkedEnemies = new List<EnemyMarker>();
 
     public void Escape()
     {

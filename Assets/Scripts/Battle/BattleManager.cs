@@ -10,6 +10,9 @@ public class BattleManager : MonoBehaviour
     public enum BattleState { Setup, AssignPhase, ClashResolution, BattleEnd }
     public BattleState CurrentState { get; private set; }
 
+    [Header("特殊戰鬥規則")]
+    public bool endBattleOnFirstKill = false;
+
     [Header("戰鬥單位")]
     public BattleUnit Player;
     public List<BattleUnit> Enemies = new List<BattleUnit>();
@@ -119,11 +122,23 @@ public class BattleManager : MonoBehaviour
         if (_ui != null)
         {
             _ui.ClearAllSlots(); _allActiveSlots.Clear();
-            for (int i = 0; i < Player.speedDiceCount; i++) _allActiveSlots.Add(_ui.CreateSlot(Player, Random.Range(Player.minSpeed, Player.maxSpeed + 1), true));
+
+            // ★ 行動槽平衡機制：玩家的槽數 = 玩家基本槽數 或 敵人總槽數，取最大值
+            int totalEnemySlots = 0;
+            foreach (var e in Enemies) totalEnemySlots += e.speedDiceCount;
+            int playerSlotCount = Mathf.Max(Player.speedDiceCount, totalEnemySlots);
+
+            for (int i = 0; i < playerSlotCount; i++)
+            {
+                _allActiveSlots.Add(_ui.CreateSlot(Player, Random.Range(Player.minSpeed, Player.maxSpeed + 1), true));
+            }
+
             var pSlots = _allActiveSlots.Where(s => s.IsPlayerSlot).ToList();
+
             foreach (var enemy in Enemies)
             {
-                for (int i = 0; i < enemy.speedDiceCount; i++)
+                int eSlotCount = enemy.speedDiceCount;
+                for (int i = 0; i < eSlotCount; i++)
                 {
                     SpeedDiceSlot slot = _ui.CreateSlot(enemy, Random.Range(enemy.minSpeed, enemy.maxSpeed + 1), false);
                     _allActiveSlots.Add(slot);
@@ -227,7 +242,6 @@ public class BattleManager : MonoBehaviour
             if (dA != null && dB == null && aIsMelee && dist > 2f) { dashTargetA = currentPosB - currentDir * 1.5f; currentPosA = dashTargetA; }
             if (dB != null && dA == null && bIsMelee && dist > 2f) { dashTargetB = currentPosA + currentDir * 1.5f; currentPosB = dashTargetB; }
 
-            // ★ 修正：對方處於混亂時（骰子被強制跳過），近戰方仍需衝到對方面前
             bool aEffectivelyAlone = dA != null && aIsMelee && (dB == null || unitB.IsStaggered) && dist > 2f;
             bool bEffectivelyAlone = dB != null && bIsMelee && (dA == null || unitA.IsStaggered) && dist > 2f;
             if (aEffectivelyAlone && dashTargetA == currentPosA) { dashTargetA = currentPosB - currentDir * 1.5f; currentPosA = dashTargetA; }
@@ -403,13 +417,19 @@ public class BattleManager : MonoBehaviour
     private bool CheckBattleEnd()
     {
         if (Player.CurrentHP <= 0) { StartCoroutine(EndBattleSequence(false)); return true; }
+
         List<BattleUnit> deadEnemies = Enemies.Where(e => e.CurrentHP <= 0).ToList();
         foreach (var dead in deadEnemies) { dead.gameObject.SetActive(false); Enemies.Remove(dead); }
-        if (Enemies.Count == 0) { StartCoroutine(EndBattleSequence(true)); return true; }
+
+        // ★ 如果開啟了「首殺結束」且有人死亡，或者是所有敵人都死光了，就結束戰鬥
+        if ((endBattleOnFirstKill && deadEnemies.Count > 0) || Enemies.Count == 0)
+        {
+            StartCoroutine(EndBattleSequence(true));
+            return true;
+        }
         return false;
     }
 
-    // ★ 供 UI 點擊結算面板時呼叫——點擊後立刻同步執行所有收尾
     private bool _lastBattleResult = false;
 
     public void ConfirmBattleEnd()
@@ -427,7 +447,7 @@ public class BattleManager : MonoBehaviour
     {
         _lastBattleResult = playerWins;
         ChangeState(BattleState.BattleEnd);
-        OnBattleEnded?.Invoke(playerWins);  // UI 收到後顯示面板，等待玩家點擊
-        yield break;                         // Coroutine 立刻結束，不再 WaitUntil
+        OnBattleEnded?.Invoke(playerWins);
+        yield break;
     }
 }

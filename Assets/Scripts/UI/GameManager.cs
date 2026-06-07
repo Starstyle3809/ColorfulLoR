@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -24,7 +25,7 @@ public class GameManager : MonoBehaviour
     [Header("探索場景根物件")]
     public GameObject exploreCanvas;
 
-    private EnemyMarker _currentEnemy;
+    private List<EnemyMarker> _currentEnemies = new List<EnemyMarker>();
 
     // ─────────────────────────────────────────────────────
     private void Awake()
@@ -53,26 +54,33 @@ public class GameManager : MonoBehaviour
     }
 
     // ── 觸發戰鬥（由 MapExploration 呼叫）────────────────
-    public void StartBattle(EnemyMarker enemy, bool isAmbush)
-    {
-        _currentEnemy = enemy;
-        CurrentState = GameState.Battle;
 
+    // ★ 新增一個 List 記錄當下遭遇的所有地圖敵人標記
+    private System.Collections.Generic.List<EnemyMarker> _currentEncounter = new System.Collections.Generic.List<EnemyMarker>();
+
+    // ── 觸發戰鬥（由 MapExploration 呼叫）────────────────
+    public void StartBattle(EnemyMarker triggeredEnemy, bool isAmbush)
+    {
+        _currentEnemies.Clear();
+        _currentEnemies.Add(triggeredEnemy);
+        _currentEnemies.AddRange(triggeredEnemy.linkedEnemies); // 把同夥也加進來
+
+        CurrentState = GameState.Battle;
         mapExploration?.SetMovementEnabled(false);
         CameraDirector.Instance?.SwitchToBattleOverview();
 
         if (battleCanvas) battleCanvas.SetActive(true);
         if (exploreCanvas) exploreCanvas.SetActive(false);
 
-        // ★ 修正：將單一敵人包裝成 List 交給新的戰鬥系統
-        System.Collections.Generic.List<BattleUnit> enemies = new System.Collections.Generic.List<BattleUnit>();
-        if (enemy != null && enemy.battleUnit != null)
+        // 把地圖標記轉換為戰鬥單位
+        List<BattleUnit> enemies = new List<BattleUnit>();
+        foreach (var marker in _currentEnemies)
         {
-            enemies.Add(enemy.battleUnit);
+            if (marker != null && marker.battleUnit != null)
+                enemies.Add(marker.battleUnit);
         }
 
         BattleManager.Instance?.StartBattle(playerUnit, enemies, isAmbush);
-        // (已移除舊版的 BindUnits，現在由系統自動處理)
     }
 
     // ── 戰鬥結束回調 ─────────────────────────────────────
@@ -81,15 +89,22 @@ public class GameManager : MonoBehaviour
         if (!playerWins)
         {
             Debug.Log("[GameManager] 玩家敗北，重置場景");
-            UnityEngine.SceneManagement.SceneManager.LoadScene(
-                UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
+            UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
             return;
         }
 
-        // 敵人消滅
-        if (_currentEnemy) _currentEnemy.gameObject.SetActive(false);
+        // ★ 判斷敵人是死亡還是存活(逃跑)
+        foreach (var marker in _currentEnemies)
+        {
+            if (marker != null)
+            {
+                if (marker.battleUnit.CurrentHP <= 0)
+                    marker.gameObject.SetActive(false); // 死亡直接消失
+                else
+                    marker.Escape(); // 存活的執行逃跑
+            }
+        }
 
-        // 延遲返回探索
         Invoke(nameof(EnterExploreMode), 2f);
     }
 }
