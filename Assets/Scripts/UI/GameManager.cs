@@ -49,7 +49,7 @@ public class GameManager : MonoBehaviour
         if (exploreCanvas) exploreCanvas.SetActive(true);
 
         // ★ 確保探索模式下，腳下的跟隨 UI 也完全隱藏
-        battleUI?.HideUI();
+        battleUI?.DisableEntireBattleUI();
     }
 
     // ── 觸發戰鬥（由 MapExploration 呼叫）────────────────
@@ -64,13 +64,15 @@ public class GameManager : MonoBehaviour
         if (battleCanvas) battleCanvas.SetActive(true);
         if (exploreCanvas) exploreCanvas.SetActive(false);
 
-        var enemyUnit = enemy.battleUnit;
+        // ★ 修正：將單一敵人包裝成 List 交給新的戰鬥系統
+        System.Collections.Generic.List<BattleUnit> enemies = new System.Collections.Generic.List<BattleUnit>();
+        if (enemy != null && enemy.battleUnit != null)
+        {
+            enemies.Add(enemy.battleUnit);
+        }
 
-        // ★ 修正核心順序：必須「先」讓 BattleManager 初始化雙方數值與抽牌
-        BattleManager.Instance?.StartBattle(playerUnit, enemyUnit, isAmbush);
-
-        // ★ 初始化完成後，「再」綁定 UI。這樣 UI 讀取到的就會是滿血 (或被偷襲後的扣血狀態)！
-        battleUI?.BindUnits(playerUnit, enemyUnit);
+        BattleManager.Instance?.StartBattle(playerUnit, enemies, isAmbush);
+        // (已移除舊版的 BindUnits，現在由系統自動處理)
     }
 
     // ── 戰鬥結束回調 ─────────────────────────────────────

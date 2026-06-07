@@ -1,17 +1,34 @@
 using UnityEngine;
+using System.Collections;
 
 /// <summary>
-/// 掛在場景中的敵人物件上，作為遭遇觸發的識別標記。
-/// 需搭配 Collider（Is Trigger = true）。
+/// 擴充版：加入第一關專用的「逃跑」機制。
 /// </summary>
 public class EnemyMarker : MonoBehaviour
 {
-    [Tooltip("對應的 BattleUnit 資料（可放在同物件或子物件）")]
     public BattleUnit battleUnit;
+    public float escapeSpeed = 8f;
 
-    private void Reset()
+    public void Escape()
     {
-        // 自動嘗試抓取同物件的 BattleUnit
-        battleUnit = GetComponent<BattleUnit>();
+        StartCoroutine(EscapeRoutine());
+    }
+
+    private IEnumerator EscapeRoutine()
+    {
+        Transform playerTransform = GameObject.FindGameObjectWithTag("Player").transform;
+        Vector3 escapeDir = (transform.position - playerTransform.position).normalized;
+        escapeDir.y = 0;
+
+        float elapsed = 0f;
+        while (elapsed < 3f)
+        {
+            transform.position += escapeDir * escapeSpeed * Time.deltaTime;
+            transform.rotation = Quaternion.LookRotation(escapeDir);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        Destroy(gameObject);
     }
 }
