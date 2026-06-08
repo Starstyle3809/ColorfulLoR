@@ -72,6 +72,12 @@ public class BattleManager : MonoBehaviour
         }
     }
 
+    // ★ 新增：供 UI 讀取，判斷哪些卡片已經被裝填了
+    public List<SpeedDiceSlot> GetPlayerSlots()
+    {
+        return _allActiveSlots.Where(s => s.IsPlayerSlot).ToList();
+    }
+
     public void StartBattle(BattleUnit player, List<BattleUnit> enemies, bool isAmbush)
     {
         if (_cinemachineBrain != null) _cinemachineBrain.enabled = false;
@@ -123,7 +129,6 @@ public class BattleManager : MonoBehaviour
         {
             _ui.ClearAllSlots(); _allActiveSlots.Clear();
 
-            // ★ 行動槽平衡機制：玩家的槽數 = 玩家基本槽數 或 敵人總槽數，取最大值
             int totalEnemySlots = 0;
             foreach (var e in Enemies) totalEnemySlots += e.speedDiceCount;
             int playerSlotCount = Mathf.Max(Player.speedDiceCount, totalEnemySlots);
@@ -421,7 +426,6 @@ public class BattleManager : MonoBehaviour
         List<BattleUnit> deadEnemies = Enemies.Where(e => e.CurrentHP <= 0).ToList();
         foreach (var dead in deadEnemies) { dead.gameObject.SetActive(false); Enemies.Remove(dead); }
 
-        // ★ 如果開啟了「首殺結束」且有人死亡，或者是所有敵人都死光了，就結束戰鬥
         if ((endBattleOnFirstKill && deadEnemies.Count > 0) || Enemies.Count == 0)
         {
             StartCoroutine(EndBattleSequence(true));

@@ -10,8 +10,8 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
     private Canvas _canvas;
     private CanvasGroup _canvasGroup;
     private Vector3 _originalScale;
-
     private float hoverScaleMultiplier = 1.15f;
+
     private void Awake()
     {
         _originalScale = transform.localScale;
@@ -32,7 +32,6 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        // ★ 修正：右鍵只單純呼叫詳細大圖檢視，不傳入改變位置的參數
         if (eventData.button == PointerEventData.InputButton.Right)
         {
             FindAnyObjectByType<BattleUIController>().ShowCardInspect(cardData);
@@ -41,7 +40,7 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (eventData.dragging) return; // 拖曳中不放大
+        if (eventData.dragging) return;
         transform.localScale = _originalScale * hoverScaleMultiplier;
     }
 
@@ -55,7 +54,7 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
     {
         if (_canvasGroup != null) _canvasGroup.blocksRaycasts = false;
         if (_canvas != null) transform.SetParent(_canvas.transform);
-        transform.localScale = _originalScale * 0.7f; // 拖曳時縮小
+        transform.localScale = _originalScale * 0.7f;
     }
 
     public void OnDrag(PointerEventData eventData) => transform.position = eventData.position;
@@ -69,35 +68,27 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
         List<RaycastResult> results = new List<RaycastResult>();
         EventSystem.current.RaycastAll(pointerData, results);
 
+        SpeedDiceSlot targetSlot = null;
+
+        // ★ 嚴格判定：只找滑鼠底下的 SpeedDiceSlot，不再尋找 EnemyTargetArea
         foreach (var result in results)
         {
-            SpeedDiceSlot enemySlot = result.gameObject.GetComponent<SpeedDiceSlot>();
-            if (enemySlot != null && !enemySlot.IsPlayerSlot)
-            {
-                bool canClash = false;
-
-                if (enemySlot.TargetSlot == sourceSlot) canClash = true;
-                else if (sourceSlot.Speed > enemySlot.Speed) canClash = true;
-
-                if (canClash)
-                {
-                    sourceSlot.SetAction(cardData, enemySlot, null);
-                    enemySlot.TargetSlot = sourceSlot;
-                    Debug.Log($"[系統] 攔截成功！進入拼點狀態。");
-                }
-                else
-                {
-                    sourceSlot.SetAction(cardData, null, enemySlot.Owner);
-                    Debug.Log($"[系統] 速度不足，將進行單方面攻擊。");
-                }
-
-                FindAnyObjectByType<BattleUIController>().CloseCardSelection();
-                Destroy(gameObject);
-                return;
-            }
+            if (targetSlot == null) targetSlot = result.gameObject.GetComponentInParent<SpeedDiceSlot>();
         }
 
-        FindAnyObjectByType<BattleUIController>().CloseCardSelection();
+        var uiController = FindAnyObjectByType<BattleUIController>();
+
+        // 只允許放到敵人的「行動槽」上 -> 進行拼點 (或單方面攻擊該槽位擁有者)
+        if (targetSlot != null && !targetSlot.IsPlayerSlot)
+        {
+            sourceSlot.SetAction(cardData, targetSlot, null);
+            uiController.CloseCardSelection();
+            Destroy(gameObject);
+            return;
+        }
+
+        // 如果沒放到正確的敵方行動槽上，就取消裝填並關閉介面
+        uiController.CloseCardSelection();
         Destroy(gameObject);
     }
 }

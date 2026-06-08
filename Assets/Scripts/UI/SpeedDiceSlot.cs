@@ -51,6 +51,12 @@ public class SpeedDiceSlot : MonoBehaviour, IPointerClickHandler, IPointerEnterH
                 AssignedCard = null; TargetSlot = null; TargetUnit = null;
                 if (cardThumbnail) cardThumbnail.gameObject.SetActive(false);
                 if (_ui != null) _ui.HideHoverInfo(IsPlayerSlot);
+
+                // ★ 關鍵修復：如果玩家正在打開選牌介面，點右鍵取消裝填時，立刻刷新手牌清單
+                if (_ui != null && _ui.handContainer.gameObject.activeSelf)
+                {
+                    _ui.OpenCardSelection(this);
+                }
             }
         }
         else if (eventData.button == PointerEventData.InputButton.Left)

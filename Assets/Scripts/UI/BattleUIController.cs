@@ -4,6 +4,12 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
+// ★ 新增一個輕量的類別，用來掛在敵人血條或面板上，作為「接受攻擊」的感應區
+public class EnemyTargetArea : MonoBehaviour
+{
+    public BattleUnit unit;
+}
+
 public class BattleUIController : MonoBehaviour
 {
     [Header("UI 容器")]
@@ -41,7 +47,6 @@ public class BattleUIController : MonoBehaviour
     private GameObject _playerTooltip;
     private GameObject _enemyTooltip;
 
-    // ★ 內部類別：用來動態管理多個敵人的 UI
     private class EnemyUIData
     {
         public BattleUnit unit;
@@ -91,7 +96,6 @@ public class BattleUIController : MonoBehaviour
         _enemyTooltip = CreateTooltipObject("EnemyTooltip");
     }
 
-    // ★ 初始化動態敵方UI (如果有兩隻以上的敵人，會自動從第一隻複製並接好參考)
     private void InitEnemyUIs()
     {
         foreach (var eUI in _enemyUIs)
@@ -124,12 +128,17 @@ public class BattleUIController : MonoBehaviour
                 data.staggerSlider = GetEquivalentComponent(enemyHUD, data.hud, enemyStaggerSlider);
                 data.buffText = GetEquivalentComponent(enemyHUD, data.hud, enemyBuffText);
             }
+
+            // ★ 動態幫敵人的 HUD 加上 TargetArea，這樣玩家把卡片丟到血條上就能攻擊他
+            EnemyTargetArea targetArea = data.hud.gameObject.GetComponent<EnemyTargetArea>();
+            if (targetArea == null) targetArea = data.hud.gameObject.AddComponent<EnemyTargetArea>();
+            targetArea.unit = enemy;
+
             data.hud.gameObject.SetActive(true); data.slotsGroup.gameObject.SetActive(true);
             _enemyUIs.Add(data);
         }
     }
 
-    // ★ UI 複製找元件輔助工具
     private T GetEquivalentComponent<T>(Transform originalRoot, Transform clonedRoot, T originalComponent) where T : Component
     {
         if (originalComponent == null) return null;
@@ -145,24 +154,18 @@ public class BattleUIController : MonoBehaviour
 
     private GameObject CreateTooltipObject(string name)
     {
-        var go = new GameObject(name);
-        go.transform.SetParent(this.transform, false);
-        var bg = go.AddComponent<Image>();
-        bg.color = new Color(0.08f, 0.08f, 0.08f, 0.92f);
-        var textObj = new GameObject("Text");
-        textObj.transform.SetParent(go.transform, false);
+        var go = new GameObject(name); go.transform.SetParent(this.transform, false);
+        var bg = go.AddComponent<Image>(); bg.color = new Color(0.08f, 0.08f, 0.08f, 0.92f);
+        var textObj = new GameObject("Text"); textObj.transform.SetParent(go.transform, false);
         var tmp = textObj.AddComponent<TextMeshProUGUI>();
         tmp.fontSize = 22; tmp.lineSpacing = 8; tmp.alignment = TextAlignmentOptions.Left;
         var textRt = textObj.GetComponent<RectTransform>();
         textRt.anchorMin = Vector2.zero; textRt.anchorMax = Vector2.one;
         textRt.offsetMin = new Vector2(14, 10); textRt.offsetMax = new Vector2(-14, -10);
-        var rt = go.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(240, 0);
+        var rt = go.GetComponent<RectTransform>(); rt.sizeDelta = new Vector2(240, 0);
         var csf = go.AddComponent<ContentSizeFitter>();
-        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        go.SetActive(false);
-        return go;
+        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained; csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+        go.SetActive(false); return go;
     }
 
     private void SetTooltipContent(GameObject tooltip, CardData card)
@@ -193,7 +196,6 @@ public class BattleUIController : MonoBehaviour
             RefreshPlayerUI(_bm.Player);
         }
 
-        // ★ 動態更新每一位敵人的血條和行動槽位置
         foreach (var eUI in _enemyUIs)
         {
             if (eUI.unit != null && eUI.unit.gameObject.activeInHierarchy && eUI.unit.CurrentHP > 0)
@@ -220,7 +222,6 @@ public class BattleUIController : MonoBehaviour
         UpdateTooltipPosition(_enemyTooltip, activeEnemyGroup, false);
     }
 
-    // ★ 懸浮提示：強制對齊到錨點並設定正確 Pivot
     private void UpdateTooltipPosition(GameObject tooltip, RectTransform slotsGroup, bool isPlayer)
     {
         if (tooltip == null || !tooltip.activeSelf) return;
@@ -229,14 +230,12 @@ public class BattleUIController : MonoBehaviour
         if (isPlayer && playerTooltipAnchor != null)
         {
             if (rt.parent != playerTooltipAnchor) rt.SetParent(playerTooltipAnchor, false);
-            rt.pivot = new Vector2(0f, 1f); // ★ 錨點設為左上
-            rt.anchoredPosition = Vector2.zero;
+            rt.pivot = new Vector2(0f, 1f); rt.anchoredPosition = Vector2.zero;
         }
         else if (!isPlayer && enemyTooltipAnchor != null)
         {
             if (rt.parent != enemyTooltipAnchor) rt.SetParent(enemyTooltipAnchor, false);
-            rt.pivot = new Vector2(1f, 1f); // ★ 錨點設為右上
-            rt.anchoredPosition = Vector2.zero;
+            rt.pivot = new Vector2(1f, 1f); rt.anchoredPosition = Vector2.zero;
         }
         else if (slotsGroup != null)
         {
@@ -348,7 +347,33 @@ public class BattleUIController : MonoBehaviour
         if (battleEndText) battleEndText.text = playerWins ? "勝利！" : "失敗...";
     }
 
-    public void OpenCardSelection(SpeedDiceSlot slot) { if (handContainer == null || cardButtonPrefab == null) return; handContainer.gameObject.SetActive(true); foreach (Transform child in handContainer) Destroy(child.gameObject); foreach (var card in _bm.Player.Hand) { var btn = Instantiate(cardButtonPrefab, handContainer); var cardUI = btn.GetComponent<CardUI>(); if (cardUI != null) cardUI.Setup(card, slot); } }
+    // ★ 關鍵修復：每次開啟手牌介面時，先過濾掉已經裝填在行動槽的卡片！
+    public void OpenCardSelection(SpeedDiceSlot slot)
+    {
+        if (handContainer == null || cardButtonPrefab == null) return;
+        handContainer.gameObject.SetActive(true);
+        foreach (Transform child in handContainer) Destroy(child.gameObject);
+
+        // 複製一份手牌清單
+        List<CardData> availableCards = new List<CardData>(_bm.Player.Hand);
+
+        // 檢查玩家每個行動槽，把已經裝填的卡從清單裡扣除 (只會扣一次，確保相同卡片不受影響)
+        foreach (var s in _bm.GetPlayerSlots())
+        {
+            if (s != slot && s.AssignedCard != null)
+            {
+                availableCards.Remove(s.AssignedCard);
+            }
+        }
+
+        foreach (var card in availableCards)
+        {
+            var btn = Instantiate(cardButtonPrefab, handContainer);
+            var cardUI = btn.GetComponent<CardUI>();
+            if (cardUI != null) cardUI.Setup(card, slot);
+        }
+    }
+
     public void CloseCardSelection() { if (handContainer) handContainer.gameObject.SetActive(false); }
 
     public void ClearAllSlots()
@@ -374,7 +399,7 @@ public class BattleUIController : MonoBehaviour
         return slot;
     }
 
-    // ★ 卡牌詳細大圖：修正黑底強制縮放鋪滿並完美覆蓋在背後
+    // ★ 取消代碼強制排版，完全由 Unity 介面設計控制
     public void ShowCardInspect(CardData card)
     {
         if (cardInspectPanel == null) return;
@@ -382,27 +407,20 @@ public class BattleUIController : MonoBehaviour
         if (bgOverlay)
         {
             bgOverlay.SetActive(true);
-            RectTransform bgRt = bgOverlay.GetComponent<RectTransform>();
-            if (bgRt != null)
-            {
-                bgRt.anchorMin = Vector2.zero; bgRt.anchorMax = Vector2.one;
-                bgRt.offsetMin = Vector2.zero; bgRt.offsetMax = Vector2.zero;
-            }
-            bgOverlay.transform.SetAsLastSibling(); // ★ 1. 把黑底丟到最下層
+            bgOverlay.transform.SetAsLastSibling();
         }
 
-        var layout = cardInspectPanel.GetComponent<LayoutElement>();
-        if (layout != null) layout.ignoreLayout = true;
-
-        RectTransform rt = cardInspectPanel.GetComponent<RectTransform>();
-        rt.anchorMin = new Vector2(0.5f, 0.5f); rt.anchorMax = new Vector2(0.5f, 0.5f); rt.pivot = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = Vector2.zero;
-
+        // 這裡不再使用程式強制設定錨點，你的 Unity LayoutGroup 將會完全生效！
         cardInspectPanel.SetActive(true);
-        cardInspectPanel.transform.SetAsLastSibling(); // ★ 2. 再把文字面板丟到最下層 (就能完美蓋在黑底上)
+        cardInspectPanel.transform.SetAsLastSibling();
 
         if (inspectNameText) inspectNameText.text = card.cardName;
-        if (inspectArtwork != null) { if (card.artwork != null) { inspectArtwork.sprite = card.artwork; inspectArtwork.gameObject.SetActive(true); } else { inspectArtwork.gameObject.SetActive(false); } }
+        if (inspectArtwork != null)
+        {
+            inspectArtwork.sprite = card.artwork;
+            inspectArtwork.gameObject.SetActive(card.artwork != null);
+        }
+
         string details = (card.description ?? "") + "\n\n";
         foreach (var dice in card.diceList) details += $"<color=#FFD700>[{dice.GetTypeName()}]</color> {dice.minVal} ~ {dice.maxVal}\n";
         if (inspectDescText) inspectDescText.text = details;

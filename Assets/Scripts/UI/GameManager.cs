@@ -1,11 +1,6 @@
-using System.Collections.Generic;
 using UnityEngine;
+using System.Collections.Generic;
 
-/// <summary>
-/// 全域遊戲狀態管理器。
-/// 負責協調「探索模式」與「戰鬥模式」的切換，
-/// 以及連接 CameraDirector / BattleManager / MapExploration。
-/// </summary>
 public class GameManager : MonoBehaviour
 {
     public static GameManager Instance { get; private set; }
@@ -19,7 +14,6 @@ public class GameManager : MonoBehaviour
     public MapExploration mapExploration;
 
     [Header("戰鬥場景根物件")]
-    [Tooltip("包含所有戰鬥 UI 的 Canvas 或 GameObject")]
     public GameObject battleCanvas;
 
     [Header("探索場景根物件")]
@@ -27,7 +21,6 @@ public class GameManager : MonoBehaviour
 
     private List<EnemyMarker> _currentEnemies = new List<EnemyMarker>();
 
-    // ─────────────────────────────────────────────────────
     private void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
@@ -39,7 +32,6 @@ public class GameManager : MonoBehaviour
         EnterExploreMode();
     }
 
-    // ── 進入探索模式 ──────────────────────────────────────
     public void EnterExploreMode()
     {
         CurrentState = GameState.Explore;
@@ -49,21 +41,17 @@ public class GameManager : MonoBehaviour
         if (battleCanvas) battleCanvas.SetActive(false);
         if (exploreCanvas) exploreCanvas.SetActive(true);
 
-        // ★ 確保探索模式下，腳下的跟隨 UI 也完全隱藏
         battleUI?.DisableEntireBattleUI();
     }
 
-    // ── 觸發戰鬥（由 MapExploration 呼叫）────────────────
-
-    // ★ 新增一個 List 記錄當下遭遇的所有地圖敵人標記
-    private System.Collections.Generic.List<EnemyMarker> _currentEncounter = new System.Collections.Generic.List<EnemyMarker>();
-
-    // ── 觸發戰鬥（由 MapExploration 呼叫）────────────────
     public void StartBattle(EnemyMarker triggeredEnemy, bool isAmbush)
     {
         _currentEnemies.Clear();
         _currentEnemies.Add(triggeredEnemy);
-        _currentEnemies.AddRange(triggeredEnemy.linkedEnemies); // 把同夥也加進來
+        if (triggeredEnemy.linkedEnemies != null)
+        {
+            _currentEnemies.AddRange(triggeredEnemy.linkedEnemies);
+        }
 
         CurrentState = GameState.Battle;
         mapExploration?.SetMovementEnabled(false);
@@ -72,7 +60,6 @@ public class GameManager : MonoBehaviour
         if (battleCanvas) battleCanvas.SetActive(true);
         if (exploreCanvas) exploreCanvas.SetActive(false);
 
-        // 把地圖標記轉換為戰鬥單位
         List<BattleUnit> enemies = new List<BattleUnit>();
         foreach (var marker in _currentEnemies)
         {
@@ -83,7 +70,6 @@ public class GameManager : MonoBehaviour
         BattleManager.Instance?.StartBattle(playerUnit, enemies, isAmbush);
     }
 
-    // ── 戰鬥結束回調 ─────────────────────────────────────
     public void OnBattleFinished(bool playerWins)
     {
         if (!playerWins)
@@ -93,18 +79,48 @@ public class GameManager : MonoBehaviour
             return;
         }
 
-        // ★ 判斷敵人是死亡還是存活(逃跑)
+        // ★ 關鍵修復：先立即切換回探索模式，交還攝影機控制權給 Cinemachine
+        EnterExploreMode();
+
+        // ★ 切換完畢後，才讓活著的敵人開始在探索地圖上逃跑
         foreach (var marker in _currentEnemies)
         {
             if (marker != null)
             {
                 if (marker.battleUnit.CurrentHP <= 0)
-                    marker.gameObject.SetActive(false); // 死亡直接消失
+                    marker.gameObject.SetActive(false);
                 else
-                    marker.Escape(); // 存活的執行逃跑
+                    StartCoroutine(EnemyEscapeRoutine(marker));
             }
         }
+    }
 
-        Invoke(nameof(EnterExploreMode), 2f);
+    private System.Collections.IEnumerator EnemyEscapeRoutine(EnemyMarker enemy)
+    {
+        if (enemy == null || playerUnit == null) yield break;
+
+        var agent = enemy.GetComponent<UnityEngine.AI.NavMeshAgent>();
+        if (agent != null) agent.enabled = false;
+        var collider = enemy.GetComponent<Collider>();
+        if (collider != null) collider.enabled = false;
+
+        Vector3 escapeDir = (enemy.transform.position - playerUnit.transform.position).normalized;
+        escapeDir.y = 0;
+
+        if (escapeDir == Vector3.zero)
+            escapeDir = new Vector3(UnityEngine.Random.Range(-1f, 1f), 0, UnityEngine.Random.Range(-1f, 1f)).normalized;
+
+        float speed = enemy.escapeSpeed > 0 ? enemy.escapeSpeed : 8f;
+        float elapsed = 0f;
+
+        while (elapsed < 3f && enemy != null)
+        {
+            enemy.transform.position += escapeDir * speed * Time.deltaTime;
+            enemy.transform.rotation = Quaternion.Slerp(enemy.transform.rotation, Quaternion.LookRotation(escapeDir), Time.deltaTime * 15f);
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        if (enemy != null) Destroy(enemy.gameObject);
     }
 }
