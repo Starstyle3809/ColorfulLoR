@@ -1,36 +1,46 @@
+using System.Collections.Generic;
 using UnityEngine;
-using System.Collections;
-using System.Collections.Generic; // ★ 新增
 
 public class EnemyMarker : MonoBehaviour
 {
     public BattleUnit battleUnit;
-    public float escapeSpeed = 8f;
 
-    [Header("群組戰鬥設定")]
-    [Tooltip("碰到此敵人時，會一起捲入戰鬥的同夥")]
+    [Header("地圖逃跑行為 (客製化數值)")]
+    public bool isCowardly = false;        // 是否是膽小會逃跑的怪物
+    [Tooltip("玩家進入此距離內，敵人會開始逃離")]
+    public float fleeTriggerDistance = 8f;
+    [Tooltip("逃跑時的移動速度")]
+    public float escapeSpeed = 5f;
+    [Tooltip("此群組內的其他敵人標記，進入戰鬥時會一併拉入戰鬥場景")]
     public List<EnemyMarker> linkedEnemies = new List<EnemyMarker>();
 
-    public void Escape()
+    private Transform _playerTransform;
+
+    private void Start()
     {
-        StartCoroutine(EscapeRoutine());
+        GameObject playerObj = GameObject.FindGameObjectWithTag("Player");
+        if (playerObj != null) _playerTransform = playerObj.transform;
     }
 
-    private IEnumerator EscapeRoutine()
+    private void Update()
     {
-        Transform playerTransform = GameObject.FindGameObjectWithTag("Player").transform;
-        Vector3 escapeDir = (transform.position - playerTransform.position).normalized;
-        escapeDir.y = 0;
-
-        float elapsed = 0f;
-        while (elapsed < 3f)
+        // 如果沒勾選會逃跑、找不到玩家，或正在戰鬥中，就不執行逃跑邏輯
+        if (!isCowardly || _playerTransform == null ||
+            (GameManager.Instance != null && GameManager.Instance.CurrentState == GameManager.GameState.Battle))
         {
-            transform.position += escapeDir * escapeSpeed * Time.deltaTime;
-            transform.rotation = Quaternion.LookRotation(escapeDir);
-            elapsed += Time.deltaTime;
-            yield return null;
+            return;
         }
 
-        Destroy(gameObject);
+        float dist = Vector3.Distance(transform.position, _playerTransform.position);
+
+        // 當玩家距離小於「觸發逃離的距離」時，怪物會往反方向遠離
+        if (dist < fleeTriggerDistance)
+        {
+            Vector3 escapeDir = (transform.position - _playerTransform.position).normalized;
+            escapeDir.y = 0;
+
+            transform.position += escapeDir * escapeSpeed * Time.deltaTime;
+            transform.rotation = Quaternion.LookRotation(escapeDir);
+        }
     }
 }

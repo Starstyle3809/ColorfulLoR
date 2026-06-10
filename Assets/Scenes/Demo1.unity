@@ -2757,7 +2757,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnemyMarker
   battleUnit: {fileID: 524530417}
-  escapeSpeed: 8
+  isCowardly: 1
+  fleeTriggerDistance: 1
+  escapeSpeed: 1
   linkedEnemies: []
 --- !u!65 &524530419
 BoxCollider:
@@ -9723,7 +9725,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::EnemyMarker
   battleUnit: {fileID: 1709258516}
-  escapeSpeed: 8
+  isCowardly: 0
+  fleeTriggerDistance: 1
+  escapeSpeed: 1
   linkedEnemies:
   - {fileID: 524530418}
 --- !u!114 &1709258516

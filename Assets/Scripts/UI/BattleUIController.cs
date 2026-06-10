@@ -154,23 +154,70 @@ public class BattleUIController : MonoBehaviour
 
     private GameObject CreateTooltipObject(string name)
     {
-        var go = new GameObject(name); go.transform.SetParent(this.transform, false);
-        var bg = go.AddComponent<Image>(); bg.color = new Color(0.08f, 0.08f, 0.08f, 0.92f);
-        var textObj = new GameObject("Text"); textObj.transform.SetParent(go.transform, false);
-        var tmp = textObj.AddComponent<TextMeshProUGUI>();
-        tmp.fontSize = 22; tmp.lineSpacing = 8; tmp.alignment = TextAlignmentOptions.Left;
-        var textRt = textObj.GetComponent<RectTransform>();
-        textRt.anchorMin = Vector2.zero; textRt.anchorMax = Vector2.one;
-        textRt.offsetMin = new Vector2(14, 10); textRt.offsetMax = new Vector2(-14, -10);
-        var rt = go.GetComponent<RectTransform>(); rt.sizeDelta = new Vector2(240, 0);
+        var go = new GameObject(name);
+        go.transform.SetParent(this.transform, false);
+
+        var bg = go.AddComponent<Image>();
+        bg.color = new Color(0.08f, 0.08f, 0.08f, 0.95f);
+
+        // 【新增】加入 VerticalLayoutGroup 來處理卡圖與文字的上下排版
+        var vlg = go.AddComponent<VerticalLayoutGroup>();
+        vlg.padding = new RectOffset(14, 14, 14, 14);
+        vlg.spacing = 10;
+        vlg.childControlWidth = true;
+        vlg.childControlHeight = false;
+
+        var rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta = new Vector2(240, 0);
+        rt.pivot = new Vector2(0.5f, 0f);
+
         var csf = go.AddComponent<ContentSizeFitter>();
-        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained; csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-        go.SetActive(false); return go;
+        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+
+        // 【新增】卡圖圖片物件
+        var artObj = new GameObject("Artwork");
+        artObj.transform.SetParent(go.transform, false);
+        var artImg = artObj.AddComponent<Image>();
+        artImg.preserveAspect = true;
+        var artLayout = artObj.AddComponent<LayoutElement>();
+        artLayout.preferredHeight = 160; // ★ 加大預設高度
+        artLayout.preferredWidth = 240;  // ★ 給定預設寬度，以免縮成 0
+        artLayout.minHeight = 120;       // ★ 確保最小高度
+
+
+        // 文字物件
+        var textObj = new GameObject("Text");
+        textObj.transform.SetParent(go.transform, false);
+        var tmp = textObj.AddComponent<TextMeshProUGUI>();
+        tmp.fontSize = 20;
+        tmp.lineSpacing = 5;
+        tmp.alignment = TextAlignmentOptions.Left;
+
+        go.SetActive(false);
+        return go;
     }
 
     private void SetTooltipContent(GameObject tooltip, CardData card)
     {
         var tmp = tooltip.GetComponentInChildren<TextMeshProUGUI>();
+
+        // 【新增】抓取 Artwork 並替換卡圖
+        var artTransform = tooltip.transform.Find("Artwork");
+        if (artTransform != null)
+        {
+            var artImg = artTransform.GetComponent<Image>();
+            if (artImg != null && card.artwork != null)
+            {
+                artImg.sprite = card.artwork;
+                artTransform.gameObject.SetActive(true);
+            }
+            else
+            {
+                artTransform.gameObject.SetActive(false); // 若無圖則隱藏，讓排版自動往上縮
+            }
+        }
+
         if (tmp == null) return;
         string info = $"<color=#FFFFFF><b>{card.cardName}</b></color>\n";
         foreach (var d in card.diceList)
@@ -404,15 +451,21 @@ public class BattleUIController : MonoBehaviour
     {
         if (cardInspectPanel == null) return;
 
-        if (bgOverlay)
-        {
-            bgOverlay.SetActive(true);
-            bgOverlay.transform.SetAsLastSibling();
-        }
+        // ★ 先啟用 BG_Overlay（黑底擋住其他點擊，並提供關閉入口）
+        if (bgOverlay) bgOverlay.SetActive(true);
 
-        // 這裡不再使用程式強制設定錨點，你的 Unity LayoutGroup 將會完全生效！
         cardInspectPanel.SetActive(true);
         cardInspectPanel.transform.SetAsLastSibling();
+
+        // ★ 恢復強制置中設定，避免飛出畫面
+        RectTransform rt = cardInspectPanel.GetComponent<RectTransform>();
+        if (rt != null)
+        {
+            rt.anchorMin = new Vector2(0.5f, 0.5f);
+            rt.anchorMax = new Vector2(0.5f, 0.5f);
+            rt.pivot = new Vector2(0.5f, 0.5f);
+            rt.anchoredPosition = Vector2.zero;
+        }
 
         if (inspectNameText) inspectNameText.text = card.cardName;
         if (inspectArtwork != null)

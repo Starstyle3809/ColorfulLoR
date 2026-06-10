@@ -70,7 +70,6 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
         SpeedDiceSlot targetSlot = null;
 
-        // ★ 嚴格判定：只找滑鼠底下的 SpeedDiceSlot，不再尋找 EnemyTargetArea
         foreach (var result in results)
         {
             if (targetSlot == null) targetSlot = result.gameObject.GetComponentInParent<SpeedDiceSlot>();
@@ -78,16 +77,40 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
         var uiController = FindAnyObjectByType<BattleUIController>();
 
-        // 只允許放到敵人的「行動槽」上 -> 進行拼點 (或單方面攻擊該槽位擁有者)
+        // 判斷是否放到敵人的行動槽上
         if (targetSlot != null && !targetSlot.IsPlayerSlot)
         {
-            sourceSlot.SetAction(cardData, targetSlot, null);
+            bool canClash = false;
+
+            // 速度大於對方，或是該槽原本就已經鎖定我們，則允許拼點
+            if (targetSlot.TargetSlot == sourceSlot) canClash = true;
+            else if (sourceSlot.Speed > targetSlot.Speed) canClash = true;
+
+            if (canClash)
+            {
+                // ★ 核心邏輯：如果這個敵人槽已經被「其他我方行動槽」瞄準，剝奪前一個的拼點權！
+                if (targetSlot.TargetSlot != null && targetSlot.TargetSlot != sourceSlot)
+                {
+                    targetSlot.TargetSlot.TargetSlot = null;              // 解除前一個槽的拼點狀態
+                    targetSlot.TargetSlot.TargetUnit = targetSlot.Owner;  // 強制讓前一個槽變成單方面攻擊
+                }
+
+                sourceSlot.SetAction(cardData, targetSlot, null);
+                targetSlot.TargetSlot = sourceSlot; // 敵人改瞄準最後放上去的這顆骰子
+                Debug.Log($"[系統] 攔截成功！最後一顆進入拼點狀態。");
+            }
+            else
+            {
+                // 速度不夠，只能單方面攻擊
+                sourceSlot.SetAction(cardData, null, targetSlot.Owner);
+                Debug.Log($"[系統] 速度不足，將進行單方面攻擊。");
+            }
+
             uiController.CloseCardSelection();
             Destroy(gameObject);
             return;
         }
 
-        // 如果沒放到正確的敵方行動槽上，就取消裝填並關閉介面
         uiController.CloseCardSelection();
         Destroy(gameObject);
     }
