@@ -4,70 +4,64 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-// ★ 新增一個輕量的類別，用來掛在敵人血條或面板上，作為「接受攻擊」的感應區
-public class EnemyTargetArea : MonoBehaviour
-{
-    public BattleUnit unit;
-}
-
 public class BattleUIController : MonoBehaviour
 {
     [Header("UI 容器")]
-    public RectTransform playerHUD; public RectTransform enemyHUD;
-    public RectTransform playerSlotsGroup; public RectTransform enemySlotsGroup;
+    public RectTransform playerHUD;
+    public RectTransform enemyHUD;
+    public RectTransform playerSlotsGroup;
+    public RectTransform enemySlotsGroup;
 
     [Header("動態位置偏移設定")]
     public Vector3 hpBottomOffset = new Vector3(0, -0.8f, 0);
     public float slotsForwardDistance = 1.3f;
     public Vector3 slotsVerticalOffset = new Vector3(0, 0.6f, 0);
 
-    [Header("狀態 UI")]
+    [Header("狀態 UI (綁定 EnemyHUD 模板)")]
     public TextMeshProUGUI playerHPText; public Slider playerHPSlider; public TextMeshProUGUI playerStaggerText; public Slider playerStaggerSlider; public TextMeshProUGUI playerBuffText;
     public TextMeshProUGUI enemyHPText; public Slider enemyHPSlider; public TextMeshProUGUI enemyStaggerText; public Slider enemyStaggerSlider; public TextMeshProUGUI enemyBuffText;
 
     [Header("預製物與面板")]
     public GameObject speedDiceSlotPrefab;
-    public RectTransform handContainer; public GameObject cardButtonPrefab;
-    public TextMeshProUGUI roundText; public Button startClashButton;
-    public TextMeshProUGUI battleLogText; public int maxLogLines = 8;
-    public GameObject battleEndPanel; public TextMeshProUGUI battleEndText;
+    public RectTransform handContainer;
+    public GameObject cardButtonPrefab;
+    public TextMeshProUGUI roundText;
+    public Button startClashButton;
+    public TextMeshProUGUI battleLogText;
+    public int maxLogLines = 8;
+    public GameObject battleEndPanel;
+    public TextMeshProUGUI battleEndText;
 
-    [Header("卡片檢視面板")]
+    [Header("卡片檢視面板 (右鍵詳細)")]
     public GameObject cardInspectPanel;
     public GameObject bgOverlay;
-    public Image inspectArtwork; public TextMeshProUGUI inspectNameText; public TextMeshProUGUI inspectDescText;
+    public Image inspectArtwork;
+    public TextMeshProUGUI inspectNameText;
+    public TextMeshProUGUI inspectDescText;
 
-    [Header("懸浮提示 (固定區域)")]
-    public RectTransform playerTooltipAnchor;
-    public RectTransform enemyTooltipAnchor;
+    [Header("懸停提示面板")]
+    public GameObject playerTooltipPanel;
+    public GameObject enemyTooltipPanel;
 
-    private List<string> _logLines = new();
-    private BattleManager _bm; private Camera _mainCamera;
+    private List<string> _logLines = new List<string>();
+    private BattleManager _bm;
+    private Camera _mainCamera;
 
-    private GameObject _playerTooltip;
-    private GameObject _enemyTooltip;
-
-    private class EnemyUIData
-    {
-        public BattleUnit unit;
-        public RectTransform hud;
-        public RectTransform slotsGroup;
-        public TextMeshProUGUI hpText;
-        public Slider hpSlider;
-        public TextMeshProUGUI staggerText;
-        public Slider staggerSlider;
-        public TextMeshProUGUI buffText;
-    }
-    private List<EnemyUIData> _enemyUIs = new List<EnemyUIData>();
+    private Dictionary<BattleUnit, RectTransform> _enemyHUDs = new Dictionary<BattleUnit, RectTransform>();
+    private Dictionary<BattleUnit, RectTransform> _enemySlotGroups = new Dictionary<BattleUnit, RectTransform>();
 
     private void Start()
     {
-        _bm = BattleManager.Instance; _mainCamera = Camera.main;
+        _bm = BattleManager.Instance;
+        _mainCamera = Camera.main;
+
         if (_bm == null) return;
+
         _bm.OnBattleLog += AppendLog;
         _bm.OnStateChanged += OnStateChanged;
         _bm.OnRoundStart += OnRoundStart;
         _bm.OnBattleEnded += OnBattleEnded;
+
         if (startClashButton != null) startClashButton.onClick.AddListener(() => _bm.OnStartClashButtonClicked());
         CloseCardSelection();
 
@@ -92,144 +86,46 @@ public class BattleUIController : MonoBehaviour
             });
         }
 
-        _playerTooltip = CreateTooltipObject("PlayerTooltip");
-        _enemyTooltip = CreateTooltipObject("EnemyTooltip");
+        if (playerTooltipPanel) playerTooltipPanel.SetActive(false);
+        if (enemyTooltipPanel) enemyTooltipPanel.SetActive(false);
     }
 
     private void InitEnemyUIs()
     {
-        foreach (var eUI in _enemyUIs)
+        foreach (var kvp in _enemyHUDs) if (kvp.Value != null && kvp.Value != enemyHUD) Destroy(kvp.Value.gameObject);
+        foreach (var kvp in _enemySlotGroups) if (kvp.Value != null && kvp.Value != enemySlotsGroup) Destroy(kvp.Value.gameObject);
+
+        _enemyHUDs.Clear();
+        _enemySlotGroups.Clear();
+
+        if (_bm.Enemies == null || _bm.Enemies.Count == 0) return;
+
+        if (_bm.Enemies[0] != null)
         {
-            if (eUI.hud != null && eUI.hud != enemyHUD) Destroy(eUI.hud.gameObject);
-            if (eUI.slotsGroup != null && eUI.slotsGroup != enemySlotsGroup) Destroy(eUI.slotsGroup.gameObject);
+            _enemyHUDs[_bm.Enemies[0]] = enemyHUD;
+            _enemySlotGroups[_bm.Enemies[0]] = enemySlotsGroup;
+            if (enemyHUD) enemyHUD.gameObject.SetActive(true);
+            if (enemySlotsGroup) enemySlotsGroup.gameObject.SetActive(true);
         }
-        _enemyUIs.Clear();
 
-        for (int i = 0; i < _bm.Enemies.Count; i++)
+        for (int i = 1; i < _bm.Enemies.Count; i++)
         {
-            BattleUnit enemy = _bm.Enemies[i];
-            EnemyUIData data = new EnemyUIData();
-            data.unit = enemy;
+            if (_bm.Enemies[i] == null) continue;
 
-            if (i == 0)
+            if (enemyHUD != null)
             {
-                data.hud = enemyHUD; data.slotsGroup = enemySlotsGroup;
-                data.hpText = enemyHPText; data.hpSlider = enemyHPSlider;
-                data.staggerText = enemyStaggerText; data.staggerSlider = enemyStaggerSlider;
-                data.buffText = enemyBuffText;
-            }
-            else
-            {
-                data.hud = Instantiate(enemyHUD, enemyHUD.parent);
-                data.slotsGroup = Instantiate(enemySlotsGroup, enemySlotsGroup.parent);
-                data.hpText = GetEquivalentComponent(enemyHUD, data.hud, enemyHPText);
-                data.hpSlider = GetEquivalentComponent(enemyHUD, data.hud, enemyHPSlider);
-                data.staggerText = GetEquivalentComponent(enemyHUD, data.hud, enemyStaggerText);
-                data.staggerSlider = GetEquivalentComponent(enemyHUD, data.hud, enemyStaggerSlider);
-                data.buffText = GetEquivalentComponent(enemyHUD, data.hud, enemyBuffText);
+                RectTransform newHUD = Instantiate(enemyHUD, enemyHUD.parent);
+                newHUD.gameObject.SetActive(true);
+                _enemyHUDs[_bm.Enemies[i]] = newHUD;
             }
 
-            // ★ 動態幫敵人的 HUD 加上 TargetArea，這樣玩家把卡片丟到血條上就能攻擊他
-            EnemyTargetArea targetArea = data.hud.gameObject.GetComponent<EnemyTargetArea>();
-            if (targetArea == null) targetArea = data.hud.gameObject.AddComponent<EnemyTargetArea>();
-            targetArea.unit = enemy;
-
-            data.hud.gameObject.SetActive(true); data.slotsGroup.gameObject.SetActive(true);
-            _enemyUIs.Add(data);
-        }
-    }
-
-    private T GetEquivalentComponent<T>(Transform originalRoot, Transform clonedRoot, T originalComponent) where T : Component
-    {
-        if (originalComponent == null) return null;
-        string path = ""; Transform current = originalComponent.transform;
-        while (current != null && current != originalRoot)
-        {
-            path = (path == "") ? current.name : current.name + "/" + path;
-            current = current.parent;
-        }
-        Transform clonedObj = clonedRoot.Find(path);
-        return clonedObj != null ? clonedObj.GetComponent<T>() : null;
-    }
-
-    private GameObject CreateTooltipObject(string name)
-    {
-        var go = new GameObject(name);
-        go.transform.SetParent(this.transform, false);
-
-        var bg = go.AddComponent<Image>();
-        bg.color = new Color(0.08f, 0.08f, 0.08f, 0.95f);
-
-        // 【新增】加入 VerticalLayoutGroup 來處理卡圖與文字的上下排版
-        var vlg = go.AddComponent<VerticalLayoutGroup>();
-        vlg.padding = new RectOffset(14, 14, 14, 14);
-        vlg.spacing = 10;
-        vlg.childControlWidth = true;
-        vlg.childControlHeight = false;
-
-        var rt = go.GetComponent<RectTransform>();
-        rt.sizeDelta = new Vector2(240, 0);
-        rt.pivot = new Vector2(0.5f, 0f);
-
-        var csf = go.AddComponent<ContentSizeFitter>();
-        csf.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
-        csf.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
-
-        // 【新增】卡圖圖片物件
-        var artObj = new GameObject("Artwork");
-        artObj.transform.SetParent(go.transform, false);
-        var artImg = artObj.AddComponent<Image>();
-        artImg.preserveAspect = true;
-        var artLayout = artObj.AddComponent<LayoutElement>();
-        artLayout.preferredHeight = 160; // ★ 加大預設高度
-        artLayout.preferredWidth = 240;  // ★ 給定預設寬度，以免縮成 0
-        artLayout.minHeight = 120;       // ★ 確保最小高度
-
-
-        // 文字物件
-        var textObj = new GameObject("Text");
-        textObj.transform.SetParent(go.transform, false);
-        var tmp = textObj.AddComponent<TextMeshProUGUI>();
-        tmp.fontSize = 20;
-        tmp.lineSpacing = 5;
-        tmp.alignment = TextAlignmentOptions.Left;
-
-        go.SetActive(false);
-        return go;
-    }
-
-    private void SetTooltipContent(GameObject tooltip, CardData card)
-    {
-        var tmp = tooltip.GetComponentInChildren<TextMeshProUGUI>();
-
-        // 【新增】抓取 Artwork 並替換卡圖
-        var artTransform = tooltip.transform.Find("Artwork");
-        if (artTransform != null)
-        {
-            var artImg = artTransform.GetComponent<Image>();
-            if (artImg != null && card.artwork != null)
+            if (enemySlotsGroup != null)
             {
-                artImg.sprite = card.artwork;
-                artTransform.gameObject.SetActive(true);
-            }
-            else
-            {
-                artTransform.gameObject.SetActive(false); // 若無圖則隱藏，讓排版自動往上縮
+                RectTransform newSlots = Instantiate(enemySlotsGroup, enemySlotsGroup.parent);
+                newSlots.gameObject.SetActive(true);
+                _enemySlotGroups[_bm.Enemies[i]] = newSlots;
             }
         }
-
-        if (tmp == null) return;
-        string info = $"<color=#FFFFFF><b>{card.cardName}</b></color>\n";
-        foreach (var d in card.diceList)
-        {
-            string color = "#AAAAAA";
-            if (d.type == DiceType.MeleeAttack || d.type == DiceType.RangedAttack) color = "#FF4444";
-            else if (d.type == DiceType.Block) color = "#44AAFF";
-            else if (d.type == DiceType.Evade) color = "#44FF44";
-            else if (d.type == DiceType.Heal) color = "#00FF00";
-            info += $"<color={color}>[{d.GetTypeName()}] {d.minVal}~{d.maxVal}</color>\n";
-        }
-        tmp.text = info.TrimEnd();
     }
 
     private void Update()
@@ -240,88 +136,108 @@ public class BattleUIController : MonoBehaviour
         {
             Vector3 s = _mainCamera.WorldToScreenPoint(_bm.Player.transform.position + hpBottomOffset); s.z = 0; playerHUD.position = s;
             if (playerSlotsGroup != null) { s = _mainCamera.WorldToScreenPoint(_bm.Player.transform.position + (_bm.Player.transform.forward * slotsForwardDistance) + slotsVerticalOffset); s.z = 0; playerSlotsGroup.position = s; }
-            RefreshPlayerUI(_bm.Player);
+            RefreshPlayerHUD(_bm.Player);
         }
 
-        foreach (var eUI in _enemyUIs)
+        for (int i = 0; i < _bm.Enemies.Count; i++)
         {
-            if (eUI.unit != null && eUI.unit.gameObject.activeInHierarchy && eUI.unit.CurrentHP > 0)
+            var enemy = _bm.Enemies[i];
+            if (enemy == null) continue;
+
+            if (enemy.CurrentHP <= 0)
             {
-                Vector3 s = _mainCamera.WorldToScreenPoint(eUI.unit.transform.position + hpBottomOffset); s.z = 0; eUI.hud.position = s;
-                s = _mainCamera.WorldToScreenPoint(eUI.unit.transform.position + (eUI.unit.transform.forward * slotsForwardDistance) + slotsVerticalOffset); s.z = 0; eUI.slotsGroup.position = s;
-
-                if (eUI.hpText) eUI.hpText.text = $"HP: {eUI.unit.CurrentHP}/{eUI.unit.maxHP}";
-                if (eUI.hpSlider) eUI.hpSlider.value = (float)eUI.unit.CurrentHP / eUI.unit.maxHP;
-                if (eUI.staggerText) eUI.staggerText.text = $"混亂: {eUI.unit.CurrentStagger}/{eUI.unit.maxStagger}";
-                if (eUI.staggerSlider) eUI.staggerSlider.value = (float)eUI.unit.CurrentStagger / eUI.unit.maxStagger;
-                if (eUI.buffText) eUI.buffText.text = eUI.unit.activeBuffs.Count > 0 ? string.Join("\n", eUI.unit.activeBuffs) : "Buff";
+                if (_enemyHUDs.ContainsKey(enemy) && _enemyHUDs[enemy] != null) _enemyHUDs[enemy].gameObject.SetActive(false);
+                if (_enemySlotGroups.ContainsKey(enemy) && _enemySlotGroups[enemy] != null) _enemySlotGroups[enemy].gameObject.SetActive(false);
+                continue;
             }
-            else
+
+            if (_enemyHUDs.ContainsKey(enemy) && _enemyHUDs[enemy] != null)
             {
-                if (eUI.hud) eUI.hud.gameObject.SetActive(false);
-                if (eUI.slotsGroup) eUI.slotsGroup.gameObject.SetActive(false);
+                _enemyHUDs[enemy].gameObject.SetActive(true);
+                Vector3 s = _mainCamera.WorldToScreenPoint(enemy.transform.position + hpBottomOffset); s.z = 0; _enemyHUDs[enemy].position = s;
+                RefreshEnemyHUD(enemy, _enemyHUDs[enemy]);
             }
-        }
-
-        UpdateTooltipPosition(_playerTooltip, playerSlotsGroup, true);
-        RectTransform activeEnemyGroup = null;
-        foreach (var eUI in _enemyUIs) { if (eUI.slotsGroup != null && eUI.slotsGroup.gameObject.activeInHierarchy) { activeEnemyGroup = eUI.slotsGroup; break; } }
-        UpdateTooltipPosition(_enemyTooltip, activeEnemyGroup, false);
-    }
-
-    private void UpdateTooltipPosition(GameObject tooltip, RectTransform slotsGroup, bool isPlayer)
-    {
-        if (tooltip == null || !tooltip.activeSelf) return;
-        RectTransform rt = tooltip.GetComponent<RectTransform>();
-
-        if (isPlayer && playerTooltipAnchor != null)
-        {
-            if (rt.parent != playerTooltipAnchor) rt.SetParent(playerTooltipAnchor, false);
-            rt.pivot = new Vector2(0f, 1f); rt.anchoredPosition = Vector2.zero;
-        }
-        else if (!isPlayer && enemyTooltipAnchor != null)
-        {
-            if (rt.parent != enemyTooltipAnchor) rt.SetParent(enemyTooltipAnchor, false);
-            rt.pivot = new Vector2(1f, 1f); rt.anchoredPosition = Vector2.zero;
-        }
-        else if (slotsGroup != null)
-        {
-            Vector3 pos = slotsGroup.position; pos.y += 80f; rt.position = pos;
+            if (_enemySlotGroups.ContainsKey(enemy) && _enemySlotGroups[enemy] != null)
+            {
+                _enemySlotGroups[enemy].gameObject.SetActive(true);
+                Vector3 s = _mainCamera.WorldToScreenPoint(enemy.transform.position + (enemy.transform.forward * slotsForwardDistance) + slotsVerticalOffset); s.z = 0; _enemySlotGroups[enemy].position = s;
+            }
         }
     }
 
-    private void RefreshPlayerUI(BattleUnit unit)
+    private void RefreshPlayerHUD(BattleUnit unit)
     {
-        if (playerHPText) playerHPText.text = $"HP: {unit.CurrentHP}/{unit.maxHP}"; if (playerHPSlider) playerHPSlider.value = (float)unit.CurrentHP / unit.maxHP;
-        if (playerStaggerText) playerStaggerText.text = $"混亂: {unit.CurrentStagger}/{unit.maxStagger}"; if (playerStaggerSlider) playerStaggerSlider.value = (float)unit.CurrentStagger / unit.maxStagger;
+        if (playerHPText) playerHPText.text = $"HP: {unit.CurrentHP}/{unit.maxHP}";
+        if (playerHPSlider) playerHPSlider.value = (float)unit.CurrentHP / unit.maxHP;
+        if (playerStaggerText) playerStaggerText.text = $"Stagger: {unit.CurrentStagger}/{unit.maxStagger}";
+        if (playerStaggerSlider) playerStaggerSlider.value = (float)unit.CurrentStagger / unit.maxStagger;
         if (playerBuffText) playerBuffText.text = unit.activeBuffs.Count > 0 ? string.Join("\n", unit.activeBuffs) : "Buff";
+    }
+
+    private TextMeshProUGUI GetEnemyText(RectTransform hud, TextMeshProUGUI template)
+    {
+        if (template == null) return null;
+        if (hud == enemyHUD) return template;
+        Transform t = FindChildRecursive(hud, template.gameObject.name);
+        return t != null ? t.GetComponent<TextMeshProUGUI>() : null;
+    }
+
+    private Slider GetEnemySlider(RectTransform hud, Slider template)
+    {
+        if (template == null) return null;
+        if (hud == enemyHUD) return template;
+        Transform t = FindChildRecursive(hud, template.gameObject.name);
+        return t != null ? t.GetComponent<Slider>() : null;
+    }
+
+    private void RefreshEnemyHUD(BattleUnit unit, RectTransform hud)
+    {
+        TextMeshProUGUI hpText = GetEnemyText(hud, enemyHPText);
+        Slider hpSlider = GetEnemySlider(hud, enemyHPSlider);
+        TextMeshProUGUI stagText = GetEnemyText(hud, enemyStaggerText);
+        Slider stagSlider = GetEnemySlider(hud, enemyStaggerSlider);
+        TextMeshProUGUI buffText = GetEnemyText(hud, enemyBuffText);
+
+        if (hpText) hpText.text = $"HP: {unit.CurrentHP}/{unit.maxHP}";
+        if (hpSlider) hpSlider.value = (float)unit.CurrentHP / unit.maxHP;
+        if (stagText) stagText.text = $"Stagger: {unit.CurrentStagger}/{unit.maxStagger}";
+        if (stagSlider) stagSlider.value = (float)unit.CurrentStagger / unit.maxStagger;
+        if (buffText) buffText.text = unit.activeBuffs.Count > 0 ? string.Join("\n", unit.activeBuffs) : "Buff";
     }
 
     public void ShowFloatingText(BattleUnit unit, string message, Color color)
     {
-        RectTransform parentHUD = playerHUD;
-        if (unit != _bm.Player)
-        {
-            var eUI = _enemyUIs.Find(e => e.unit == unit);
-            if (eUI != null) parentHUD = eUI.hud;
-        }
+        RectTransform parentHUD = null;
+        if (unit == _bm.Player) parentHUD = playerHUD;
+        else if (_enemyHUDs.ContainsKey(unit)) parentHUD = _enemyHUDs[unit];
+
         if (parentHUD == null || !parentHUD.gameObject.activeInHierarchy) return;
 
-        GameObject popupObj = new GameObject("FloatingTextPopup"); popupObj.transform.SetParent(parentHUD, false);
+        GameObject popupObj = new GameObject("FloatingTextPopup");
+        popupObj.transform.SetParent(parentHUD, false);
         TextMeshProUGUI tmp = popupObj.AddComponent<TextMeshProUGUI>();
         string hexColor = ColorUtility.ToHtmlStringRGB(color);
-        tmp.text = $"<color=#{hexColor}><b>{message}</b></color>"; tmp.fontSize = 80; tmp.alignment = TextAlignmentOptions.Center;
-        RectTransform rt = tmp.GetComponent<RectTransform>(); rt.anchoredPosition = new Vector2(0, 50f);
+        tmp.text = $"<color=#{hexColor}><b>{message}</b></color>";
+        tmp.fontSize = 80;
+        tmp.alignment = TextAlignmentOptions.Center;
+
+        RectTransform rt = tmp.GetComponent<RectTransform>();
+        rt.anchoredPosition = new Vector2(0, 50f);
         StartCoroutine(AnimatePopup(tmp));
     }
 
     private IEnumerator AnimatePopup(TextMeshProUGUI tmp)
     {
-        float elapsed = 0f; float duration = 1.5f; RectTransform rt = tmp.GetComponent<RectTransform>();
-        Vector2 startPos = rt.anchoredPosition; Vector2 endPos = startPos + new Vector2(0, 150f); Color c = tmp.color;
+        float elapsed = 0f; float duration = 1.5f;
+        RectTransform rt = tmp.GetComponent<RectTransform>();
+        Vector2 startPos = rt.anchoredPosition;
+        Vector2 endPos = startPos + new Vector2(0, 150f);
+        Color c = tmp.color;
+
         while (elapsed < duration)
         {
-            elapsed += Time.unscaledDeltaTime; if (rt != null) rt.anchoredPosition = Vector2.Lerp(startPos, endPos, elapsed / duration);
+            elapsed += Time.unscaledDeltaTime;
+            if (rt != null) rt.anchoredPosition = Vector2.Lerp(startPos, endPos, elapsed / duration);
             if (tmp != null) { c.a = Mathf.Lerp(1f, 0f, elapsed / duration); tmp.color = c; }
             yield return null;
         }
@@ -331,89 +247,89 @@ public class BattleUIController : MonoBehaviour
     public void DisableEntireBattleUI()
     {
         if (battleEndPanel) battleEndPanel.SetActive(false);
-        HideCardInspect(); ClearAllSlots(); CloseCardSelection(); HideHoverInfo();
+        HideCardInspect();
+        ClearAllSlots();
+        CloseCardSelection();
+        HideHoverInfo();
+
         if (playerHUD) playerHUD.gameObject.SetActive(false);
-        foreach (var eUI in _enemyUIs) { if (eUI.hud) eUI.hud.gameObject.SetActive(false); }
-        if (enemyHUD) enemyHUD.gameObject.SetActive(false);
-        if (roundText) roundText.gameObject.SetActive(false); if (startClashButton) startClashButton.gameObject.SetActive(false);
+        foreach (var hud in _enemyHUDs.Values) if (hud) hud.gameObject.SetActive(false);
+
+        if (roundText) roundText.gameObject.SetActive(false);
+        if (startClashButton) startClashButton.gameObject.SetActive(false);
         if (battleLogText) battleLogText.gameObject.SetActive(false);
     }
 
     public void HideAllCombatUI()
     {
         if (playerHUD) playerHUD.gameObject.SetActive(false);
+        foreach (var hud in _enemyHUDs.Values) if (hud) hud.gameObject.SetActive(false);
+
         if (playerSlotsGroup) playerSlotsGroup.gameObject.SetActive(false);
-        foreach (var eUI in _enemyUIs)
-        {
-            if (eUI.hud) eUI.hud.gameObject.SetActive(false);
-            if (eUI.slotsGroup) eUI.slotsGroup.gameObject.SetActive(false);
-        }
-        if (startClashButton) startClashButton.gameObject.SetActive(false); if (roundText) roundText.gameObject.SetActive(false);
+        foreach (var grp in _enemySlotGroups.Values) if (grp) grp.gameObject.SetActive(false);
+
+        if (startClashButton) startClashButton.gameObject.SetActive(false);
+        if (roundText) roundText.gameObject.SetActive(false);
         if (handContainer) handContainer.gameObject.SetActive(false);
-        ClearAllSlots(); HideHoverInfo();
+
+        ClearAllSlots();
+        HideHoverInfo();
     }
 
     public void ShowCombatUI()
     {
         if (playerHUD) playerHUD.gameObject.SetActive(true);
+        foreach (var hud in _enemyHUDs.Values) if (hud) hud.gameObject.SetActive(true);
+
         if (playerSlotsGroup) playerSlotsGroup.gameObject.SetActive(true);
-        foreach (var eUI in _enemyUIs)
-        {
-            if (eUI.hud) eUI.hud.gameObject.SetActive(true);
-            if (eUI.slotsGroup) eUI.slotsGroup.gameObject.SetActive(true);
-        }
-        if (startClashButton) startClashButton.gameObject.SetActive(true); if (roundText) roundText.gameObject.SetActive(true);
+        foreach (var grp in _enemySlotGroups.Values) if (grp) grp.gameObject.SetActive(true);
+
+        if (startClashButton) startClashButton.gameObject.SetActive(true);
+        if (roundText) roundText.gameObject.SetActive(true);
         if (battleLogText) battleLogText.gameObject.SetActive(true);
     }
 
     private void OnStateChanged(BattleManager.BattleState state)
     {
-        if (state == BattleManager.BattleState.Setup) InitEnemyUIs();
+        if (state == BattleManager.BattleState.Setup)
+        {
+            InitEnemyUIs();
+        }
 
         if (startClashButton) startClashButton.interactable = (state == BattleManager.BattleState.AssignPhase);
 
         if (state == BattleManager.BattleState.ClashResolution)
         {
             if (playerSlotsGroup) playerSlotsGroup.gameObject.SetActive(false);
-            foreach (var eUI in _enemyUIs) if (eUI.slotsGroup) eUI.slotsGroup.gameObject.SetActive(false);
+            foreach (var grp in _enemySlotGroups.Values) if (grp) grp.gameObject.SetActive(false);
         }
         else if (state == BattleManager.BattleState.AssignPhase || state == BattleManager.BattleState.Setup)
         {
             if (playerSlotsGroup) playerSlotsGroup.gameObject.SetActive(true);
-            foreach (var eUI in _enemyUIs) if (eUI.slotsGroup) eUI.slotsGroup.gameObject.SetActive(true);
+            foreach (var grp in _enemySlotGroups.Values) if (grp) grp.gameObject.SetActive(true);
         }
 
         if (state == BattleManager.BattleState.BattleEnd) HideAllCombatUI();
     }
 
-    private void OnRoundStart() { if (roundText) roundText.text = $"第 {_bm.currentRound} 幕"; CloseCardSelection(); }
+    private void OnRoundStart()
+    {
+        if (roundText) roundText.text = $"Round {_bm.currentRound}";
+        CloseCardSelection();
+    }
 
     private void OnBattleEnded(bool playerWins)
     {
         if (battleEndPanel) battleEndPanel.SetActive(true);
-        if (battleEndText) battleEndText.text = playerWins ? "勝利！" : "失敗...";
+        if (battleEndText) battleEndText.text = playerWins ? "Victory!" : "Defeat...";
     }
 
-    // ★ 關鍵修復：每次開啟手牌介面時，先過濾掉已經裝填在行動槽的卡片！
     public void OpenCardSelection(SpeedDiceSlot slot)
     {
         if (handContainer == null || cardButtonPrefab == null) return;
         handContainer.gameObject.SetActive(true);
         foreach (Transform child in handContainer) Destroy(child.gameObject);
-
-        // 複製一份手牌清單
-        List<CardData> availableCards = new List<CardData>(_bm.Player.Hand);
-
-        // 檢查玩家每個行動槽，把已經裝填的卡從清單裡扣除 (只會扣一次，確保相同卡片不受影響)
-        foreach (var s in _bm.GetPlayerSlots())
-        {
-            if (s != slot && s.AssignedCard != null)
-            {
-                availableCards.Remove(s.AssignedCard);
-            }
-        }
-
-        foreach (var card in availableCards)
+        foreach (var card in _bm.Player.Hand)
         {
             var btn = Instantiate(cardButtonPrefab, handContainer);
             var cardUI = btn.GetComponent<CardUI>();
@@ -426,8 +342,7 @@ public class BattleUIController : MonoBehaviour
     public void ClearAllSlots()
     {
         if (playerSlotsGroup) foreach (Transform child in playerSlotsGroup) Destroy(child.gameObject);
-        foreach (var eUI in _enemyUIs) { if (eUI.slotsGroup) foreach (Transform child in eUI.slotsGroup) Destroy(child.gameObject); }
-        if (enemySlotsGroup) foreach (Transform child in enemySlotsGroup) Destroy(child.gameObject);
+        foreach (var grp in _enemySlotGroups.Values) if (grp) foreach (Transform child in grp) Destroy(child.gameObject);
     }
 
     public SpeedDiceSlot CreateSlot(BattleUnit unit, int speed, bool isPlayer)
@@ -435,8 +350,7 @@ public class BattleUIController : MonoBehaviour
         RectTransform parentGroup = playerSlotsGroup;
         if (!isPlayer)
         {
-            var eUI = _enemyUIs.Find(e => e.unit == unit);
-            if (eUI != null) parentGroup = eUI.slotsGroup;
+            if (_enemySlotGroups.ContainsKey(unit)) parentGroup = _enemySlotGroups[unit];
             else parentGroup = enemySlotsGroup;
         }
 
@@ -446,37 +360,69 @@ public class BattleUIController : MonoBehaviour
         return slot;
     }
 
-    // ★ 取消代碼強制排版，完全由 Unity 介面設計控制
+    // ────────────────────────────────────────────────────────
+    // 顯示文字產生器 (純文字風格，無表情符號)
+    // ────────────────────────────────────────────────────────
+    private string GenerateLibraryStyleDiceText(CardData card)
+    {
+        string details = "";
+
+        // 描述區塊
+        if (!string.IsNullOrEmpty(card.description))
+        {
+            details += $"<size=90%><color=#DDDDDD>{card.description}</color></size>\n";
+        }
+
+        // 加上分隔線讓描述與骰子區分開來
+        if (card.diceList.Count > 0)
+        {
+            details += "<color=#555555>─────────────────</color>\n";
+        }
+
+        // 骰子數值區塊
+        foreach (var d in card.diceList)
+        {
+            string colorHex = "#FFFFFF";
+            string typeTag = "";
+
+            switch (d.type)
+            {
+                case DiceType.MeleeAttack: colorHex = "#E84141"; typeTag = "[近戰]"; break;
+                case DiceType.RangedAttack: colorHex = "#E84141"; typeTag = "[遠程]"; break;
+                case DiceType.Block: colorHex = "#417BE8"; typeTag = "[格擋]"; break;
+                case DiceType.Evade: colorHex = "#41E86E"; typeTag = "[閃避]"; break;
+                case DiceType.Heal: colorHex = "#E8D341"; typeTag = "[回復]"; break;
+            }
+
+            details += $"<color={colorHex}><b>{typeTag}</b> <space=1em>{d.minVal} - {d.maxVal}</color>\n";
+        }
+        return details.TrimEnd();
+    }
+
     public void ShowCardInspect(CardData card)
     {
         if (cardInspectPanel == null) return;
 
-        // ★ 先啟用 BG_Overlay（黑底擋住其他點擊，並提供關閉入口）
         if (bgOverlay) bgOverlay.SetActive(true);
-
         cardInspectPanel.SetActive(true);
-        cardInspectPanel.transform.SetAsLastSibling();
 
-        // ★ 恢復強制置中設定，避免飛出畫面
-        RectTransform rt = cardInspectPanel.GetComponent<RectTransform>();
-        if (rt != null)
-        {
-            rt.anchorMin = new Vector2(0.5f, 0.5f);
-            rt.anchorMax = new Vector2(0.5f, 0.5f);
-            rt.pivot = new Vector2(0.5f, 0.5f);
-            rt.anchoredPosition = Vector2.zero;
-        }
+        if (inspectNameText) inspectNameText.text = $"<size=120%><b>{card.cardName}</b></size>";
 
-        if (inspectNameText) inspectNameText.text = card.cardName;
         if (inspectArtwork != null)
         {
-            inspectArtwork.sprite = card.artwork;
-            inspectArtwork.gameObject.SetActive(card.artwork != null);
+            if (card.artwork != null)
+            {
+                inspectArtwork.sprite = card.artwork;
+                inspectArtwork.gameObject.SetActive(true);
+            }
+            else
+            {
+                inspectArtwork.gameObject.SetActive(false);
+            }
         }
 
-        string details = (card.description ?? "") + "\n\n";
-        foreach (var dice in card.diceList) details += $"<color=#FFD700>[{dice.GetTypeName()}]</color> {dice.minVal} ~ {dice.maxVal}\n";
-        if (inspectDescText) inspectDescText.text = details;
+        if (inspectDescText)
+            inspectDescText.text = GenerateLibraryStyleDiceText(card);
     }
 
     public void HideCardInspect()
@@ -487,25 +433,112 @@ public class BattleUIController : MonoBehaviour
 
     public void ShowHoverInfo(CardData card, RectTransform slotRect, bool isPlayerSlot)
     {
-        GameObject tooltip = isPlayerSlot ? _playerTooltip : _enemyTooltip;
-        if (tooltip == null) return;
+        GameObject targetPanel = isPlayerSlot ? playerTooltipPanel : enemyTooltipPanel;
+        if (targetPanel == null) return;
 
-        SetTooltipContent(tooltip, card);
-        tooltip.SetActive(true);
-        tooltip.transform.SetAsLastSibling();
+        UpdateTooltipData(targetPanel, card);
+        targetPanel.SetActive(true);
+    }
+
+    private Transform FindChildRecursive(Transform parent, string childName)
+    {
+        foreach (Transform child in parent)
+        {
+            if (child.name == childName) return child;
+        }
+        foreach (Transform child in parent)
+        {
+            Transform found = FindChildRecursive(child, childName);
+            if (found != null) return found;
+        }
+        return null;
+    }
+
+    private void UpdateTooltipData(GameObject panel, CardData card)
+    {
+        // 1. 抓取左半邊的卡圖 (Artwork)
+        Image artImg = null;
+        var artTransform = FindChildRecursive(panel.transform, "Artwork");
+        if (artTransform != null) artImg = artTransform.GetComponent<Image>();
+
+        if (artImg == null)
+        {
+            Image[] allImages = panel.GetComponentsInChildren<Image>(true);
+            foreach (var img in allImages)
+            {
+                if (img.gameObject != panel) { artImg = img; break; }
+            }
+        }
+
+        if (artImg != null)
+        {
+            if (card.artwork != null)
+            {
+                artImg.sprite = card.artwork;
+                artImg.gameObject.SetActive(true);
+            }
+            else
+            {
+                artImg.gameObject.SetActive(false);
+            }
+        }
+
+        // 2. ★ 智慧抓取文字元件 (解決名稱不符導致全擠在一起的問題)
+        TextMeshProUGUI[] allTexts = panel.GetComponentsInChildren<TextMeshProUGUI>(true);
+        TextMeshProUGUI nameTmp = null;
+        TextMeshProUGUI contentTmp = null;
+
+        // 2-a. 先嘗試模糊比對名稱 (無視大小寫與後綴)
+        foreach (var t in allTexts)
+        {
+            string lowerName = t.name.ToLower();
+            if (lowerName.Contains("name")) nameTmp = t;
+            else if (lowerName.Contains("content") || lowerName.Contains("desc") || lowerName.Contains("info")) contentTmp = t;
+        }
+
+        // 2-b. 如果名稱比對失敗，依照 Unity 內的層級順序直接分配
+        if (nameTmp == null && allTexts.Length > 0) nameTmp = allTexts[0];
+        if (contentTmp == null && allTexts.Length > 1)
+        {
+            for (int i = 1; i < allTexts.Length; i++)
+            {
+                // 確保不跟卡名抓到同一個
+                if (allTexts[i] != nameTmp) { contentTmp = allTexts[i]; break; }
+            }
+        }
+
+        // 3. 填入資料
+        if (nameTmp != null && contentTmp != null)
+        {
+            // 有兩個獨立的文字框，完美分離 (左圖右文成功！)
+            nameTmp.text = $"<size=120%><color=#FFFFFF><b>{card.cardName}</b></color></size>";
+            contentTmp.text = GenerateLibraryStyleDiceText(card);
+        }
+        else if (nameTmp != null)
+        {
+            // 極端防呆：如果你的 UI 真的只有放一個文字框，才把它們合併顯示
+            string info = $"<size=120%><color=#FFFFFF><b>{card.cardName}</b></color></size>\n";
+            info += GenerateLibraryStyleDiceText(card);
+            nameTmp.text = info;
+        }
     }
 
     public void HideHoverInfo(bool isPlayerSlot)
     {
-        if (isPlayerSlot && _playerTooltip != null) _playerTooltip.SetActive(false);
-        else if (!isPlayerSlot && _enemyTooltip != null) _enemyTooltip.SetActive(false);
+        if (isPlayerSlot && playerTooltipPanel != null) playerTooltipPanel.SetActive(false);
+        else if (!isPlayerSlot && enemyTooltipPanel != null) enemyTooltipPanel.SetActive(false);
     }
 
     public void HideHoverInfo()
     {
-        if (_playerTooltip != null) _playerTooltip.SetActive(false);
-        if (_enemyTooltip != null) _enemyTooltip.SetActive(false);
+        if (playerTooltipPanel != null) playerTooltipPanel.SetActive(false);
+        if (enemyTooltipPanel != null) enemyTooltipPanel.SetActive(false);
     }
 
-    private void AppendLog(string line) { _logLines.Add(line); if (_logLines.Count > maxLogLines) _logLines.RemoveAt(0); if (battleLogText) battleLogText.text = string.Join("\n", _logLines); }
+    private void AppendLog(string line)
+    {
+        _logLines.Add(line);
+        if (_logLines.Count > maxLogLines) _logLines.RemoveAt(0);
+        if (battleLogText) battleLogText.text = string.Join("\n", _logLines);
+    }
 }
