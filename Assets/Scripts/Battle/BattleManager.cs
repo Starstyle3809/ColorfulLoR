@@ -123,7 +123,7 @@ public class BattleManager : MonoBehaviour
     private void StartRound()
     {
         Player.ResetStaggerAtRoundStart(); foreach (var e in Enemies) e.ResetStaggerAtRoundStart();
-        Player.DrawCards(1); foreach (var e in Enemies) e.DrawCards(1);
+        Player.DrawCards(Player.speedDiceCount); foreach (var e in Enemies) e.DrawCards(1);
 
         if (_ui != null)
         {

@@ -26,7 +26,11 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
     {
         cardData = card;
         sourceSlot = source;
-        if (GetComponentInChildren<TMPro.TextMeshProUGUI>())
+
+        // 如果你的 UI 內有 Name 這個文字框，更新卡名
+        var nameText = transform.Find("Name")?.GetComponent<TMPro.TextMeshProUGUI>();
+        if (nameText != null) nameText.text = card.cardName;
+        else if (GetComponentInChildren<TMPro.TextMeshProUGUI>())
             GetComponentInChildren<TMPro.TextMeshProUGUI>().text = card.cardName;
     }
 
@@ -40,14 +44,13 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (eventData.dragging) return;
         transform.localScale = _originalScale * hoverScaleMultiplier;
+        transform.SetAsLastSibling();
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        if (eventData.dragging) return;
-        transform.localScale = _originalScale;
+        if (!eventData.dragging) transform.localScale = _originalScale;
     }
 
     public void OnBeginDrag(PointerEventData eventData)
@@ -77,7 +80,7 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
         var uiController = FindAnyObjectByType<BattleUIController>();
 
-        // 判斷是否放到敵人的行動槽上
+        // 只允許放到敵人的「行動槽」上 -> 進行拼點 (或單方面攻擊該槽位擁有者)
         if (targetSlot != null && !targetSlot.IsPlayerSlot)
         {
             bool canClash = false;
@@ -88,30 +91,37 @@ public class CardUI : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHa
 
             if (canClash)
             {
-                // ★ 核心邏輯：如果這個敵人槽已經被「其他我方行動槽」瞄準，剝奪前一個的拼點權！
-                if (targetSlot.TargetSlot != null && targetSlot.TargetSlot != sourceSlot)
+                // ★ 完美攔截邏輯：掃描所有我方行動槽，將所有之前瞄準此敵人槽的我方行動槽強制降級
+                if (uiController.playerSlotsGroup != null)
                 {
-                    targetSlot.TargetSlot.TargetSlot = null;              // 解除前一個槽的拼點狀態
-                    targetSlot.TargetSlot.TargetUnit = targetSlot.Owner;  // 強制讓前一個槽變成單方面攻擊
+                    var allPlayerSlots = uiController.playerSlotsGroup.GetComponentsInChildren<SpeedDiceSlot>();
+                    foreach (var pSlot in allPlayerSlots)
+                    {
+                        // 若這不是現在拖的這顆，但它正在瞄準目標敵人槽
+                        if (pSlot != sourceSlot && pSlot.TargetSlot == targetSlot)
+                        {
+                            pSlot.TargetSlot = null;             // 解除它的拼點權
+                            pSlot.TargetUnit = targetSlot.Owner; // 改為單向攻擊敵人單位
+                        }
+                    }
                 }
 
                 sourceSlot.SetAction(cardData, targetSlot, null);
                 targetSlot.TargetSlot = sourceSlot; // 敵人改瞄準最後放上去的這顆骰子
-                Debug.Log($"[系統] 攔截成功！最後一顆進入拼點狀態。");
             }
             else
             {
-                // 速度不夠，只能單方面攻擊
+                // 速度不夠，只能單方面攻擊該敵人
                 sourceSlot.SetAction(cardData, null, targetSlot.Owner);
-                Debug.Log($"[系統] 速度不足，將進行單方面攻擊。");
             }
 
+            // ★ 裝填完成後立即隱藏這張卡牌
+            gameObject.SetActive(false);
             uiController.CloseCardSelection();
-            Destroy(gameObject);
             return;
         }
 
         uiController.CloseCardSelection();
-        Destroy(gameObject);
+        Destroy(gameObject); // 沒放到正確位置就銷毀這張拖曳的 UI 牌
     }
 }
