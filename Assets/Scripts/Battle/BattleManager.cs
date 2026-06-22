@@ -20,11 +20,8 @@ public class BattleManager : MonoBehaviour
 
     [Header("打擊感參數 (可自由調整)")]
     public float clashFovShake = 4f;
-    public float staggerFovShake = 20f;
     public float preClashWaitTime = 0.8f;
     public float normalHitStopTime = 0.05f;
-    public float staggerHitStopDuration = 1.0f;
-    public float staggerTimeScale = 0.02f;
 
     public event System.Action<BattleState> OnStateChanged;
     public event System.Action<string> OnBattleLog;
@@ -39,11 +36,11 @@ public class BattleManager : MonoBehaviour
     private Transform _camFocusA;
     private Transform _camFocusB;
     private MonoBehaviour _cinemachineBrain;
+    private float _originalOrthoSize = 5f;
 
     private float _fovShakeOffset = 0f;
     private bool _isRangedClash = false;
     private bool _isCameraTracking = false;
-
 
     private void Awake() { if (Instance != null && Instance != this) { Destroy(gameObject); return; } Instance = this; }
 
@@ -55,32 +52,10 @@ public class BattleManager : MonoBehaviour
 
     private void Log(string msg) => OnBattleLog?.Invoke(msg);
 
-    private void LateUpdate()
-    {
-        if (CurrentState == BattleState.BattleEnd || !_isCameraTracking) return;
-
-        if (_camFocusA != null && _camFocusB != null)
-        {
-            Vector3 midPoint = (_camFocusA.position + _camFocusB.position) / 2f;
-            float dist = Vector3.Distance(_camFocusA.position, _camFocusB.position);
-
-            float targetZ = _isRangedClash ? (-8f - (dist * 0.35f)) : -10f;
-            float targetFOV = _isRangedClash ? Mathf.Clamp(45f + (dist * 1.5f), 45f, 75f) : _originalFOV;
-
-            Camera.main.transform.position = Vector3.Lerp(Camera.main.transform.position, new Vector3(midPoint.x, 2.5f, targetZ), Time.deltaTime * 6f);
-            Camera.main.fieldOfView = Mathf.Lerp(Camera.main.fieldOfView, targetFOV, Time.deltaTime * 6f) + _fovShakeOffset;
-        }
-    }
-
-    // ★ 新增：供 UI 讀取，判斷哪些卡片已經被裝填了
-    public List<SpeedDiceSlot> GetPlayerSlots()
-    {
-        return _allActiveSlots.Where(s => s.IsPlayerSlot).ToList();
-    }
+    public List<SpeedDiceSlot> GetPlayerSlots() { return _allActiveSlots.Where(s => s.IsPlayerSlot).ToList(); }
 
     public void StartBattle(BattleUnit player, List<BattleUnit> enemies, bool isAmbush)
     {
-        if (_cinemachineBrain != null) _cinemachineBrain.enabled = false;
         if (_ui != null) _ui.ShowCombatUI();
 
         if (Camera.main != null)
@@ -88,8 +63,9 @@ public class BattleManager : MonoBehaviour
             Camera.main.transform.position = new Vector3(0, 2.5f, -12f);
             Camera.main.transform.rotation = Quaternion.Euler(5f, 0, 0);
             Camera.main.fieldOfView = 60f;
-            _originalCamPos = Camera.main.transform.position;
             _originalFOV = 60f;
+            _originalOrthoSize = Camera.main.orthographicSize;
+            _originalCamPos = Camera.main.transform.position;
         }
 
         Player = player; Enemies = enemies; currentRound = 1;
@@ -122,16 +98,23 @@ public class BattleManager : MonoBehaviour
 
     private void StartRound()
     {
-        Player.ResetStaggerAtRoundStart(); foreach (var e in Enemies) e.ResetStaggerAtRoundStart();
-        Player.DrawCards(Player.speedDiceCount); foreach (var e in Enemies) e.DrawCards(1);
+        CurrentState = BattleState.Setup;
+
+        int totalEnemySlots = 0;
+        foreach (var e in Enemies) totalEnemySlots += e.speedDiceCount;
+        int playerSlotCount = Mathf.Max(Player.speedDiceCount, totalEnemySlots);
+
+        if (Player != null && Player.CurrentHP > 0) Player.DrawCards(playerSlotCount);
+
+        foreach (var enemy in Enemies)
+        {
+            if (enemy == null || enemy.CurrentHP <= 0) continue;
+            enemy.DrawCards(enemy.speedDiceCount);
+        }
 
         if (_ui != null)
         {
             _ui.ClearAllSlots(); _allActiveSlots.Clear();
-
-            int totalEnemySlots = 0;
-            foreach (var e in Enemies) totalEnemySlots += e.speedDiceCount;
-            int playerSlotCount = Mathf.Max(Player.speedDiceCount, totalEnemySlots);
 
             for (int i = 0; i < playerSlotCount; i++)
             {
@@ -147,7 +130,8 @@ public class BattleManager : MonoBehaviour
                 {
                     SpeedDiceSlot slot = _ui.CreateSlot(enemy, Random.Range(enemy.minSpeed, enemy.maxSpeed + 1), false);
                     _allActiveSlots.Add(slot);
-                    if (enemy.Hand.Count > 0 && enemy.staggerTurnsLeft <= 0)
+                    // 拔除 stagger 判斷
+                    if (enemy.Hand.Count > 0)
                     {
                         CardData chosenCard = enemy.Hand[Random.Range(0, enemy.Hand.Count)];
                         SpeedDiceSlot randomTarget = pSlots.Count > 0 ? pSlots[Random.Range(0, pSlots.Count)] : null;
@@ -163,7 +147,7 @@ public class BattleManager : MonoBehaviour
     {
         if (CurrentState != BattleState.AssignPhase) return;
         var playerSlots = _allActiveSlots.Where(s => s.Owner == Player).ToList();
-        if (playerSlots.Any(s => s.AssignedCard == null && s.Owner.staggerTurnsLeft <= 0)) { Log("<color=#FF4444>[警告] 您還有行動槽未配置書頁！</color>"); return; }
+        if (playerSlots.Any(s => s.AssignedCard == null)) { Log("<color=#FF4444>[警告] 您還有行動槽未配置書頁！</color>"); return; }
         StartCoroutine(ExecuteAllSlotsRoutine());
     }
 
@@ -174,10 +158,10 @@ public class BattleManager : MonoBehaviour
 
         foreach (var slot in sortedSlots)
         {
-            if (slot.IsResolved || slot.Owner.CurrentHP <= 0 || slot.Owner.staggerTurnsLeft > 0) continue;
+            if (slot.IsResolved || slot.Owner.CurrentHP <= 0) continue;
             SpeedDiceSlot targetSlot = slot.TargetSlot; BattleUnit targetUnit = slot.TargetUnit;
 
-            if (targetSlot != null && !targetSlot.IsResolved && targetSlot.Owner.CurrentHP > 0 && targetSlot.Owner.staggerTurnsLeft <= 0)
+            if (targetSlot != null && !targetSlot.IsResolved && targetSlot.Owner.CurrentHP > 0)
             {
                 yield return StartCoroutine(ResolveClash(slot.Owner, slot.AssignedCard, targetSlot.Owner, targetSlot.AssignedCard));
                 slot.Owner.Discard(slot.AssignedCard); slot.Owner.Hand.Remove(slot.AssignedCard); slot.IsResolved = true;
@@ -186,14 +170,27 @@ public class BattleManager : MonoBehaviour
             }
             else
             {
-                if (targetUnit == null && Enemies.Count > 0) targetUnit = slot.Owner == Player ? Enemies[0] : Player;
-                if (targetUnit != null && targetUnit.CurrentHP > 0) yield return StartCoroutine(ResolveClash(slot.Owner, slot.AssignedCard, targetUnit, null));
-                slot.Owner.Discard(slot.AssignedCard); slot.Owner.Hand.Remove(slot.AssignedCard); slot.IsResolved = true;
+                BattleUnit originalTarget = targetUnit;
+                if (originalTarget == null && targetSlot != null) originalTarget = targetSlot.Owner;
+
+                if (originalTarget != null && originalTarget.CurrentHP > 0)
+                {
+                    yield return StartCoroutine(ResolveClash(slot.Owner, slot.AssignedCard, originalTarget, null));
+                }
+                else
+                {
+                    Log($"<color=#AAAAAA>[中斷] {slot.Owner.unitName} 的目標已倒下，取消攻擊。</color>");
+                    yield return new WaitForSeconds(0.4f);
+                }
+
+                slot.Owner.Discard(slot.AssignedCard);
+                slot.Owner.Hand.Remove(slot.AssignedCard);
+                slot.IsResolved = true;
             }
         }
 
         _camFocusA = null; _camFocusB = null; _isRangedClash = false; _isCameraTracking = false;
-        yield return StartCoroutine(ResetCameraRoutine());
+        CameraDirector.Instance?.SwitchToBattleOverview();
 
         if (!CheckBattleEnd()) { currentRound++; StartRound(); }
     }
@@ -202,20 +199,20 @@ public class BattleManager : MonoBehaviour
     {
         Log($"<b>[交鋒] {unitA.unitName} vs {unitB.unitName}</b>");
         _camFocusA = unitA.transform; _camFocusB = unitB.transform;
-        _isCameraTracking = true;
+        CameraDirector.Instance?.SwitchToBattleClash(unitA.transform, unitB.transform);
+
+        // ★ 每回合交鋒開始，清空舊護盾
+        unitA.currentShield = 0; unitB.currentShield = 0;
 
         Vector3 startPosA = unitA.transform.position; Vector3 startPosB = unitB.transform.position;
         Vector3 currentPosA = startPosA; Vector3 currentPosB = startPosB;
-        int idxA = 0, idxB = 0; List<DiceData> diceA = cardA.diceList; List<DiceData> diceB = cardB != null ? cardB.diceList : new List<DiceData>();
-
-        bool aWasStaggered = unitA.IsStaggered;
-        bool bWasStaggered = unitB.IsStaggered;
+        int idxA = 0, idxB = 0;
+        List<DiceData> diceA = cardA != null ? cardA.diceList : new List<DiceData>();
+        List<DiceData> diceB = cardB != null ? cardB.diceList : new List<DiceData>();
 
         while (idxA < diceA.Count || idxB < diceB.Count)
         {
             if (unitA.CurrentHP <= 0 || unitB.CurrentHP <= 0) break;
-            if (unitA.IsStaggered && idxA < diceA.Count) { idxA = diceA.Count; Log($"<color=#AAAAAA>[中斷] {unitA.unitName} 處於混亂，後續行動強制取消！</color>"); }
-            if (unitB.IsStaggered && idxB < diceB.Count) { idxB = diceB.Count; Log($"<color=#AAAAAA>[中斷] {unitB.unitName} 處於混亂，後續行動強制取消！</color>"); }
 
             DiceData dA = idxA < diceA.Count ? diceA[idxA] : null; DiceData dB = idxB < diceB.Count ? diceB[idxB] : null;
 
@@ -223,6 +220,7 @@ public class BattleManager : MonoBehaviour
             bool bIsAtk = dB != null && (dB.type == DiceType.MeleeAttack || dB.type == DiceType.RangedAttack);
             bool aIsBlk = dA != null && dA.type == DiceType.Block; bool bIsBlk = dB != null && dB.type == DiceType.Block;
             bool aIsEvd = dA != null && dA.type == DiceType.Evade; bool bIsEvd = dB != null && dB.type == DiceType.Evade;
+            bool aIsHeal = dA != null && dA.type == DiceType.Heal; bool bIsHeal = dB != null && dB.type == DiceType.Heal;
             bool aIsMelee = dA != null && dA.type == DiceType.MeleeAttack; bool bIsMelee = dB != null && dB.type == DiceType.MeleeAttack;
             bool aIsRanged = dA != null && dA.type == DiceType.RangedAttack; bool bIsRanged = dB != null && dB.type == DiceType.RangedAttack;
 
@@ -230,7 +228,6 @@ public class BattleManager : MonoBehaviour
 
             Vector3 currentDir = (currentPosB - currentPosA).normalized; if (currentDir == Vector3.zero) currentDir = Vector3.right; currentDir.y = 0;
             float dist = Vector3.Distance(currentPosA, currentPosB);
-
             Vector3 dashTargetA = currentPosA; Vector3 dashTargetB = currentPosB;
 
             if (dist > 3f)
@@ -247,8 +244,8 @@ public class BattleManager : MonoBehaviour
             if (dA != null && dB == null && aIsMelee && dist > 2f) { dashTargetA = currentPosB - currentDir * 1.5f; currentPosA = dashTargetA; }
             if (dB != null && dA == null && bIsMelee && dist > 2f) { dashTargetB = currentPosA + currentDir * 1.5f; currentPosB = dashTargetB; }
 
-            bool aEffectivelyAlone = dA != null && aIsMelee && (dB == null || unitB.IsStaggered) && dist > 2f;
-            bool bEffectivelyAlone = dB != null && bIsMelee && (dA == null || unitA.IsStaggered) && dist > 2f;
+            bool aEffectivelyAlone = dA != null && aIsMelee && dB == null && dist > 2f;
+            bool bEffectivelyAlone = dB != null && bIsMelee && dA == null && dist > 2f;
             if (aEffectivelyAlone && dashTargetA == currentPosA) { dashTargetA = currentPosB - currentDir * 1.5f; currentPosA = dashTargetA; }
             if (bEffectivelyAlone && dashTargetB == currentPosB) { dashTargetB = currentPosA + currentDir * 1.5f; currentPosB = dashTargetB; }
 
@@ -256,144 +253,105 @@ public class BattleManager : MonoBehaviour
             if (dashTargetB != currentPosB) StartCoroutine(MoveUnitRoutine(unitB.transform, dashTargetB, 0.15f));
             if (dashTargetA != currentPosA || dashTargetB != currentPosB) yield return new WaitForSeconds(0.2f);
 
-            if (dA != null && dB != null)
-            {
-                Log($"<color=#00FFFF>【拼點準備】 {unitA.unitName}({dA.GetTypeName()}) vs {unitB.unitName}({dB.GetTypeName()})</color>");
-                yield return new WaitForSeconds(preClashWaitTime);
-            }
-            else if (dA != null)
-            {
-                Log($"<color=#FFA500>【單方準備】 {unitA.unitName}({dA.GetTypeName()}) 發動攻擊！</color>");
-                yield return new WaitForSeconds(preClashWaitTime * 0.8f);
-            }
-            else if (dB != null)
-            {
-                Log($"<color=#FFA500>【單方準備】 {unitB.unitName}({dB.GetTypeName()}) 發動攻擊！</color>");
-                yield return new WaitForSeconds(preClashWaitTime * 0.8f);
-            }
+            if (dA != null && dB != null) { Log($"<color=#00FFFF>【拚點準備】 {unitA.unitName}({dA.GetTypeName()}) vs {unitB.unitName}({dB.GetTypeName()})</color>"); yield return new WaitForSeconds(preClashWaitTime); }
+            else if (dA != null) { Log($"<color=#FFA500>【單方準備】 {unitA.unitName}({dA.GetTypeName()}) 發動！</color>"); yield return new WaitForSeconds(preClashWaitTime * 0.8f); }
+            else if (dB != null) { Log($"<color=#FFA500>【單方準備】 {unitB.unitName}({dB.GetTypeName()}) 發動！</color>"); yield return new WaitForSeconds(preClashWaitTime * 0.8f); }
 
-            if ((aIsBlk || aIsEvd) && (bIsBlk || bIsEvd)) { Log($"<color=#AAAAAA>[對峙] 雙方皆為防守姿態，互相架開。</color>"); idxA++; idxB++; continue; }
-            if (dA != null && dA.type == DiceType.Heal) { int h = dA.Roll(); unitA.Heal(h); Log($"<color=#00FF00>[回復] {unitA.unitName} 恢復了 {h} 點生命 (骰出 {h})。</color>"); idxA++; continue; }
-            if (dB != null && dB.type == DiceType.Heal) { int h = dB.Roll(); unitB.Heal(h); Log($"<color=#00FF00>[回復] {unitB.unitName} 恢復了 {h} 點生命 (骰出 {h})。</color>"); idxB++; continue; }
+            // ★ 擲骰子：單純比大小決定勝負
+            int valA = dA != null ? dA.Roll() : 0;
+            int valB = dB != null ? dB.Roll() : 0;
 
-            int valA = dA != null ? dA.Roll() : 0; int valB = dB != null ? dB.Roll() : 0;
-            int baseDmgA = 0, stagA = 0, healStagA = 0; int baseDmgB = 0, stagB = 0, healStagB = 0;
+            // ★ 紀錄要扣除的實質傷害
+            int finalDmgA = 0;
+            int finalDmgB = 0;
 
             if (dA != null && dB != null)
             {
-                if (valA > valB)
+                if (valA > valB) // A 贏
                 {
                     idxB++;
-                    if (aIsMelee && bIsRanged)
-                    {
-                        baseDmgB = 0; stagB = 0;
-                        if (dist > 2.5f) currentPosA += currentDir * 2.5f;
-                        Log($"<color=#00FFFF>[彈開] {unitA.unitName} 劈開了遠程攻擊，強行逼近！(骰出 {valA} vs {valB})</color>");
-                    }
+                    if (aIsMelee && bIsRanged) { if (dist > 2.5f) currentPosA += currentDir * 2.5f; Log($"<color=#00FFFF>[彈開] {unitA.unitName} 劈開遠程攻擊逼近！(拚點 {valA} vs {valB})</color>"); }
                     else
                     {
-                        if (aIsAtk && bIsBlk) { baseDmgB = Mathf.Max(0, valA - valB); stagB = Mathf.Max(0, valA - valB); Log($"<color=#44AAFF>[格擋] {unitB.unitName} 盾牌吸收衝擊！(骰出 {valA} vs {valB})</color>"); }
-                        else if (aIsAtk && bIsEvd) { baseDmgB = valA; stagB = valA; Log($"<color=#FFA500>[擊破] {unitA.unitName} 擊破閃避！(骰出 {valA} vs {valB})</color>"); }
-                        else if (aIsBlk && bIsAtk) { stagB = Mathf.Max(0, valA - valB); Log($"<color=#44AAFF>[反震] {unitA.unitName} 完美格擋並震傷對方！(骰出 {valA} vs {valB})</color>"); }
-                        else if (aIsEvd && bIsAtk) { healStagA = valA; Log($"<color=#00FF00>[閃避] {unitA.unitName} 躲避成功恢復混亂！(骰出 {valA} vs {valB})</color>"); }
-                        else { baseDmgB = valA; stagB = valA; Log($"<color=#FFA500>[拼點勝利] {unitA.unitName} 壓制對手！(骰出 {valA} vs {valB})</color>"); }
+                        Log($"<color=#FFA500>[拚點勝利] {unitA.unitName} 勝出！(拚點 {valA} vs {valB})</color>");
+
+                        // ★ 根據卡牌設定的 effectValue 來結算！
+                        if (aIsAtk) { finalDmgB = dA.effectValue; }
+                        else if (aIsBlk) { unitA.GainShield(dA.effectValue); Log($"<color=#44AAFF>└ 獲得 {dA.effectValue} 點護盾</color>"); }
+                        else if (aIsHeal) { unitA.Heal(dA.effectValue); Log($"<color=#00FF00>└ 恢復 {dA.effectValue} 點生命</color>"); }
 
                         if (!aIsEvd) idxA++;
                         if (aIsMelee && !bIsMelee && !bIsBlk && !bIsEvd && dist > 2.5f) currentPosA += currentDir * 1f;
                     }
                     StartCoroutine(FOVShakeRoutine(0.2f, clashFovShake));
                 }
-                else if (valB > valA)
+                else if (valB > valA) // B 贏
                 {
                     idxA++;
-                    if (bIsMelee && aIsRanged)
-                    {
-                        baseDmgA = 0; stagA = 0;
-                        if (dist > 2.5f) currentPosB -= currentDir * 2.5f;
-                        Log($"<color=#00FFFF>[彈開] {unitB.unitName} 劈開了遠程攻擊，強行逼近！(骰出 {valB} vs {valA})</color>");
-                    }
+                    if (bIsMelee && aIsRanged) { if (dist > 2.5f) currentPosB -= currentDir * 2.5f; Log($"<color=#00FFFF>[彈開] {unitB.unitName} 劈開遠程攻擊逼近！(拚點 {valB} vs {valA})</color>"); }
                     else
                     {
-                        if (bIsAtk && aIsBlk) { baseDmgA = Mathf.Max(0, valB - valA); stagA = Mathf.Max(0, valB - valA); Log($"<color=#44AAFF>[格擋] {unitA.unitName} 盾牌吸收衝擊！(骰出 {valA} vs {valB})</color>"); }
-                        else if (bIsAtk && aIsEvd) { baseDmgA = valB; stagA = valB; Log($"<color=#FFA500>[擊破] {unitB.unitName} 擊破閃避！(骰出 {valA} vs {valB})</color>"); }
-                        else if (bIsBlk && aIsAtk) { stagA = Mathf.Max(0, valB - valA); Log($"<color=#44AAFF>[反震] {unitB.unitName} 完美格擋並震傷對方！(骰出 {valA} vs {valB})</color>"); }
-                        else if (bIsEvd && aIsAtk) { healStagB = valB; Log($"<color=#00FF00>[閃避] {unitB.unitName} 躲避成功恢復混亂！(骰出 {valA} vs {valB})</color>"); }
-                        else { baseDmgA = valB; stagA = valB; Log($"<color=#FFA500>[拼點勝利] {unitB.unitName} 壓制對手！(骰出 {valA} vs {valB})</color>"); }
+                        Log($"<color=#FFA500>[拚點勝利] {unitB.unitName} 勝出！(拚點 {valB} vs {valA})</color>");
+
+                        // ★ 根據卡牌設定的 effectValue 來結算！
+                        if (bIsAtk) { finalDmgA = dB.effectValue; }
+                        else if (bIsBlk) { unitB.GainShield(dB.effectValue); Log($"<color=#44AAFF>└ 獲得 {dB.effectValue} 點護盾</color>"); }
+                        else if (bIsHeal) { unitB.Heal(dB.effectValue); Log($"<color=#00FF00>└ 恢復 {dB.effectValue} 點生命</color>"); }
 
                         if (!bIsEvd) idxB++;
                         if (bIsMelee && !aIsMelee && !aIsBlk && !aIsEvd && dist > 2.5f) currentPosB -= currentDir * 1f;
                     }
                     StartCoroutine(FOVShakeRoutine(0.2f, clashFovShake));
                 }
-                else
+                else // 平手
                 {
-                    Log($"<color=#AAAAAA>[拼點] 平手！({valA} vs {valB}) 武器相交，火花四濺。</color>");
+                    Log($"<color=#AAAAAA>[平手] 武器相交，火花四濺！({valA} vs {valB})</color>");
                     idxA++; idxB++;
                     StartCoroutine(FOVShakeRoutine(0.2f, clashFovShake * 0.5f));
+                    CameraDirector.Instance?.TriggerImpulse(0.5f);
                 }
             }
-            else if (dA != null)
+            else if (dA != null) // A 單方行動
             {
                 idxA++;
+                Log($"<color=#FFA500>[單方行動] 執行！(拚點數值 {valA})</color>");
+                if (aIsAtk) { finalDmgB = dA.effectValue; }
+                else if (aIsBlk) { unitA.GainShield(dA.effectValue); }
+                else if (aIsHeal) { unitA.Heal(dA.effectValue); }
                 StartCoroutine(FOVShakeRoutine(0.2f, clashFovShake));
-                if (aIsAtk) { baseDmgB = valA; stagB = valA; Log($"<color=#FFA500>[命中] {unitA.unitName} 單方攻擊命中！(骰出 {valA})</color>"); }
             }
-            else if (dB != null)
+            else if (dB != null) // B 單方行動
             {
                 idxB++;
+                Log($"<color=#FFA500>[單方行動] 執行！(拚點數值 {valB})</color>");
+                if (bIsAtk) { finalDmgA = dB.effectValue; }
+                else if (bIsBlk) { unitB.GainShield(dB.effectValue); }
+                else if (bIsHeal) { unitB.Heal(dB.effectValue); }
                 StartCoroutine(FOVShakeRoutine(0.2f, clashFovShake));
-                if (bIsAtk) { baseDmgA = valB; stagA = valB; Log($"<color=#FFA500>[命中] {unitB.unitName} 單方攻擊命中！(骰出 {valB})</color>"); }
             }
 
-            if (baseDmgA > 0 || stagA > 0)
+            // ===== 結算實質傷害 =====
+            if (finalDmgA > 0)
             {
-                int actualDmgA = unitA.TakeDamage(baseDmgA); if (baseDmgA == 0 && stagA > 0) unitA.TakeStaggerDamage(stagA);
-                Log($"<color=#FF0000>└ 造成 {actualDmgA} 點生命與 {stagA} 點混亂傷害！</color>");
-            }
-            if (healStagA > 0) unitA.HealStagger(healStagA);
-
-            if (baseDmgB > 0 || stagB > 0)
-            {
-                int actualDmgB = unitB.TakeDamage(baseDmgB); if (baseDmgB == 0 && stagB > 0) unitB.TakeStaggerDamage(stagB);
-                Log($"<color=#FF0000>└ 造成 {actualDmgB} 點生命與 {stagB} 點混亂傷害！</color>");
-            }
-            if (healStagB > 0) unitB.HealStagger(healStagB);
-
-            if (!aWasStaggered && unitA.IsStaggered)
-            {
-                aWasStaggered = true; Log($"<color=#FFFF00><b>【擊破】{unitA.unitName} 防線崩潰，陷入混亂！</b></color>");
-                _ui.ShowFloatingText(unitA, "混亂!", Color.yellow);
-                StartCoroutine(FOVShakeRoutine(0.4f, staggerFovShake));
-                yield return StartCoroutine(HitStopRoutine(staggerHitStopDuration, staggerTimeScale));
-            }
-            else if (!bWasStaggered && unitB.IsStaggered)
-            {
-                bWasStaggered = true; Log($"<color=#FFFF00><b>【擊破】{unitB.unitName} 防線崩潰，陷入混亂！</b></color>");
-                _ui.ShowFloatingText(unitB, "混亂!", Color.yellow);
-                StartCoroutine(FOVShakeRoutine(0.4f, staggerFovShake));
-                yield return StartCoroutine(HitStopRoutine(staggerHitStopDuration, staggerTimeScale));
-            }
-            else
-            {
-                yield return StartCoroutine(HitStopRoutine(normalHitStopTime, 0.1f));
+                int actualDmgA = unitA.TakeDamage(finalDmgA);
+                Log($"<color=#FF0000>└ 對 {unitA.unitName} 造成 {actualDmgA} 點實質傷害！</color>");
+                CameraDirector.Instance?.TriggerImpulse(1.2f);
             }
 
+            if (finalDmgB > 0)
+            {
+                int actualDmgB = unitB.TakeDamage(finalDmgB);
+                Log($"<color=#FF0000>└ 對 {unitB.unitName} 造成 {actualDmgB} 點實質傷害！</color>");
+                CameraDirector.Instance?.TriggerImpulse(1.2f);
+            }
+
+            yield return StartCoroutine(HitStopRoutine(normalHitStopTime, 0.1f));
             yield return new WaitForSeconds(0.4f);
         }
 
         StartCoroutine(MoveUnitRoutine(unitA.transform, startPosA, 0.3f));
         yield return StartCoroutine(MoveUnitRoutine(unitB.transform, startPosB, 0.3f));
         yield return new WaitForSeconds(0.1f);
-    }
-
-    private IEnumerator ResetCameraRoutine()
-    {
-        while (Vector3.Distance(Camera.main.transform.position, _originalCamPos) > 0.1f)
-        {
-            Camera.main.transform.position = Vector3.Lerp(Camera.main.transform.position, _originalCamPos, Time.deltaTime * 5f);
-            Camera.main.fieldOfView = Mathf.Lerp(Camera.main.fieldOfView, _originalFOV, Time.deltaTime * 5f);
-            yield return null;
-        }
     }
 
     private IEnumerator FOVShakeRoutine(float duration, float magnitude)
@@ -424,9 +382,20 @@ public class BattleManager : MonoBehaviour
         if (Player.CurrentHP <= 0) { StartCoroutine(EndBattleSequence(false)); return true; }
 
         List<BattleUnit> deadEnemies = Enemies.Where(e => e.CurrentHP <= 0).ToList();
-        foreach (var dead in deadEnemies) { dead.gameObject.SetActive(false); Enemies.Remove(dead); }
+        bool keyTargetDefeated = false;
 
-        if ((endBattleOnFirstKill && deadEnemies.Count > 0) || Enemies.Count == 0)
+        foreach (var dead in deadEnemies)
+        {
+            if (dead.isKeyTarget)
+            {
+                keyTargetDefeated = true;
+                Log($"<color=#FFFF00>[系統] 關鍵目標 {dead.unitName} 被擊破！敵方陣腳大亂！</color>");
+            }
+            dead.gameObject.SetActive(false);
+            Enemies.Remove(dead);
+        }
+
+        if (keyTargetDefeated || Enemies.Count == 0)
         {
             StartCoroutine(EndBattleSequence(true));
             return true;
@@ -439,10 +408,9 @@ public class BattleManager : MonoBehaviour
     public void ConfirmBattleEnd()
     {
         if (CurrentState != BattleState.BattleEnd) return;
-
         _ui.DisableEntireBattleUI();
         if (_cinemachineBrain != null) _cinemachineBrain.enabled = true;
-
+        if (Player != null) Player.transform.rotation = Quaternion.identity;
         var gm = FindAnyObjectByType<GameManager>();
         if (gm != null) gm.SendMessage("OnBattleFinished", _lastBattleResult, SendMessageOptions.DontRequireReceiver);
     }

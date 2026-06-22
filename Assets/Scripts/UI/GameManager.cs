@@ -7,6 +7,7 @@ public class GameManager : MonoBehaviour
 
     public enum GameState { Explore, Battle }
     public GameState CurrentState { get; private set; }
+    public event System.Action<GameState> OnGameStateChanged;
 
     [Header("場景中的核心元件")]
     public BattleUnit playerUnit;
@@ -19,7 +20,7 @@ public class GameManager : MonoBehaviour
     [Header("探索場景根物件")]
     public GameObject exploreCanvas;
 
-    private List<EnemyMarker> _currentEnemies = new List<EnemyMarker>();
+    private EnemyMarker _currentEnemy;
 
     private void Awake()
     {
@@ -35,8 +36,10 @@ public class GameManager : MonoBehaviour
     public void EnterExploreMode()
     {
         CurrentState = GameState.Explore;
+        OnGameStateChanged?.Invoke(CurrentState);
         mapExploration?.SetMovementEnabled(true);
         CameraDirector.Instance?.SwitchToExplore();
+
 
         if (battleCanvas) battleCanvas.SetActive(false);
         if (exploreCanvas) exploreCanvas.SetActive(true);
@@ -44,16 +47,11 @@ public class GameManager : MonoBehaviour
         battleUI?.DisableEntireBattleUI();
     }
 
-    public void StartBattle(EnemyMarker triggeredEnemy, bool isAmbush)
+    public void StartBattle(EnemyMarker enemy, bool isAmbush)
     {
-        _currentEnemies.Clear();
-        _currentEnemies.Add(triggeredEnemy);
-        if (triggeredEnemy.linkedEnemies != null)
-        {
-            _currentEnemies.AddRange(triggeredEnemy.linkedEnemies);
-        }
-
+        _currentEnemy = enemy;
         CurrentState = GameState.Battle;
+        OnGameStateChanged?.Invoke(CurrentState);
         mapExploration?.SetMovementEnabled(false);
         CameraDirector.Instance?.SwitchToBattleOverview();
 
@@ -61,10 +59,16 @@ public class GameManager : MonoBehaviour
         if (exploreCanvas) exploreCanvas.SetActive(false);
 
         List<BattleUnit> enemies = new List<BattleUnit>();
-        foreach (var marker in _currentEnemies)
+        if (enemy != null)
         {
-            if (marker != null && marker.battleUnit != null)
-                enemies.Add(marker.battleUnit);
+            if (enemy.battleUnit != null) enemies.Add(enemy.battleUnit);
+            if (enemy.linkedEnemies != null)
+            {
+                foreach (var linked in enemy.linkedEnemies)
+                {
+                    if (linked != null && linked.battleUnit != null) enemies.Add(linked.battleUnit);
+                }
+            }
         }
 
         BattleManager.Instance?.StartBattle(playerUnit, enemies, isAmbush);
@@ -74,53 +78,55 @@ public class GameManager : MonoBehaviour
     {
         if (!playerWins)
         {
-            Debug.Log("[GameManager] 玩家敗北，重置場景");
             UnityEngine.SceneManagement.SceneManager.LoadScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene().buildIndex);
             return;
         }
 
-        // ★ 關鍵修復：先立即切換回探索模式，交還攝影機控制權給 Cinemachine
-        EnterExploreMode();
-
-        // ★ 切換完畢後，才讓活著的敵人開始在探索地圖上逃跑
-        foreach (var marker in _currentEnemies)
+        // ★ 戰鬥勝利，正確設定 isDefeated 標記，並關閉碰撞體避免重複觸發，且這將阻止它戰後逃跑
+        if (_currentEnemy)
         {
-            if (marker != null)
+            _currentEnemy.isDefeated = true;
+            var colliders = _currentEnemy.GetComponentsInChildren<Collider>();
+            foreach (var c in colliders) c.enabled = false;
+
+            if (_currentEnemy)
             {
-                if (marker.battleUnit.CurrentHP <= 0)
-                    marker.gameObject.SetActive(false);
-                else
-                    StartCoroutine(EnemyEscapeRoutine(marker));
+                // 處理主要遭遇的敵人
+                ProcessEnemyPostBattle(_currentEnemy);
+
+                // 處理被牽扯進戰鬥的連動敵人
+                if (_currentEnemy.linkedEnemies != null)
+                {
+                    foreach (var linked in _currentEnemy.linkedEnemies)
+                    {
+                        if (linked != null)
+                        {
+                            ProcessEnemyPostBattle(linked);
+                        }
+                    }
+                }
             }
+
+            EnterExploreMode();
         }
     }
 
-    private System.Collections.IEnumerator EnemyEscapeRoutine(EnemyMarker enemy)
+        private void ProcessEnemyPostBattle(EnemyMarker marker)
     {
-        if (enemy == null || playerUnit == null) yield break;
-
-        var agent = enemy.GetComponent<UnityEngine.AI.NavMeshAgent>();
-        if (agent != null) agent.enabled = false;
-        var collider = enemy.GetComponent<Collider>();
-        if (collider != null) collider.enabled = false;
-
-        Vector3 escapeDir = (enemy.transform.position - playerUnit.transform.position).normalized;
-        escapeDir.y = 0;
-
-        if (escapeDir == Vector3.zero)
-            escapeDir = new Vector3(UnityEngine.Random.Range(-1f, 1f), 0, UnityEngine.Random.Range(-1f, 1f)).normalized;
-
-        float speed = enemy.escapeSpeed > 0 ? enemy.escapeSpeed : 8f;
-        float elapsed = 0f;
-
-        while (elapsed < 3f && enemy != null)
+        if (marker.battleUnit != null)
         {
-            enemy.transform.position += escapeDir * speed * Time.deltaTime;
-            enemy.transform.rotation = Quaternion.Slerp(enemy.transform.rotation, Quaternion.LookRotation(escapeDir), Time.deltaTime * 15f);
-            elapsed += Time.deltaTime;
-            yield return null;
+            if (marker.battleUnit.CurrentHP <= 0)
+            {
+                // 真的是被打死的：標記擊敗、關閉碰撞體
+                marker.isDefeated = true;
+                var colliders = marker.GetComponentsInChildren<Collider>();
+                foreach (var c in colliders) c.enabled = false;
+            }
+            else
+            {
+                // 沒死 (因隊長死亡而提早結束戰鬥)：強制逃跑
+                marker.ForceFlee();
+            }
         }
-
-        if (enemy != null) Destroy(enemy.gameObject);
     }
 }

@@ -7,8 +7,8 @@ public class BattleUnit : MonoBehaviour
     [Header("基本資料")]
     public string unitName = "未知單位";
     public int maxHP = 100;
-    public int maxStagger = 50;
-    public bool isKeyTarget = false; // ★ 新增：是否為擊敗即勝利的關鍵目標
+    public int currentShield = 0;
+    public bool isKeyTarget = false;
 
     [Header("戰鬥屬性")]
     public int speedDiceCount = 1;
@@ -16,9 +16,6 @@ public class BattleUnit : MonoBehaviour
     public int maxSpeed = 4;
 
     public int CurrentHP { get; private set; }
-    public int CurrentStagger { get; private set; }
-    public bool IsStaggered { get; private set; }
-    public int staggerTurnsLeft = 0;
 
     [Header("牌組")]
     public DeckData deckData;
@@ -29,52 +26,43 @@ public class BattleUnit : MonoBehaviour
     [NonSerialized] public List<string> activeBuffs = new List<string>();
 
     public event Action<int, int> OnHPChanged;
-    public event Action<int, int> OnStaggerChanged;
     public event Action<List<string>> OnBuffsChanged;
-    public event Action OnStaggered;
     public event Action OnDied;
 
     public void Initialize()
     {
-        CurrentHP = maxHP; CurrentStagger = maxStagger;
-        IsStaggered = false; staggerTurnsLeft = 0;
+        CurrentHP = maxHP; 
         DrawPile = deckData != null ? deckData.GetShuffledDeck() : new();
         DiscardPile.Clear(); Hand.Clear(); activeBuffs.Clear();
     }
 
     // ★ 修正：回傳最終真實傷害 (包含混亂的雙倍計算)
-    public int TakeDamage(int amount)
+    public int TakeDamage(int damage)
     {
-        int finalDamage = IsStaggered ? amount * 2 : amount;
-        CurrentHP = Mathf.Max(0, CurrentHP - finalDamage);
-        OnHPChanged?.Invoke(CurrentHP, maxHP);
-        if (CurrentHP <= 0) OnDied?.Invoke();
+        if (damage <= 0) return 0;
 
-        if (!IsStaggered) TakeStaggerDamage(finalDamage);
-
-        return finalDamage;
-    }
-
-    public void TakeStaggerDamage(int amount)
-    {
-        if (IsStaggered || amount <= 0) return;
-        CurrentStagger = Mathf.Max(0, CurrentStagger - amount);
-        OnStaggerChanged?.Invoke(CurrentStagger, maxStagger);
-
-        if (CurrentStagger <= 0)
+        // 優先扣除護盾
+        if (currentShield > 0)
         {
-            IsStaggered = true;
-            staggerTurnsLeft = 2;
-            OnStaggered?.Invoke();
+            if (currentShield >= damage) { currentShield -= damage; return 0; }
+            else { damage -= currentShield; currentShield = 0; }
         }
+
+        CurrentHP -= damage;
+        if (CurrentHP < 0) CurrentHP = 0;
+
+        // ★ 更新 5 格血條
+        GetComponentInChildren<CustomHPBar>()?.UpdateHP(CurrentHP);
+
+        return damage;
     }
 
-    public void HealStagger(int amount)
+
+    public void GainShield(int amount)
     {
-        if (IsStaggered || amount <= 0) return;
-        CurrentStagger = Mathf.Min(maxStagger, CurrentStagger + amount);
-        OnStaggerChanged?.Invoke(CurrentStagger, maxStagger);
+        currentShield += amount;
     }
+
 
     public void Heal(int amount)
     {
@@ -82,18 +70,7 @@ public class BattleUnit : MonoBehaviour
         OnHPChanged?.Invoke(CurrentHP, maxHP);
     }
 
-    public void ResetStaggerAtRoundStart()
-    {
-        if (IsStaggered)
-        {
-            staggerTurnsLeft--;
-            if (staggerTurnsLeft <= 0)
-            {
-                IsStaggered = false; CurrentStagger = maxStagger;
-                OnStaggerChanged?.Invoke(CurrentStagger, maxStagger);
-            }
-        }
-    }
+    
 
     public void ApplyAmbushPenalty()
     {

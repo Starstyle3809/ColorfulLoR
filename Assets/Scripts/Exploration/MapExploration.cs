@@ -17,6 +17,8 @@ public class MapExploration : MonoBehaviour
 
     private CharacterController _cc;
     private bool _canMove = true;
+    private float _velocityY;
+    private float _gravity = -9.81f;
 
     private void Awake() => _cc = GetComponent<CharacterController>();
 
@@ -34,28 +36,49 @@ public class MapExploration : MonoBehaviour
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
 
-        // ★ 修正：動態適應攝影機角度
-        // 取得主攝影機的正前方與右方，並消除 Y 軸（確保角色不會往天上飛）
         Vector3 camForward = Camera.main.transform.forward;
         camForward.y = 0f;
+
+        if (camForward.sqrMagnitude < 0.001f)
+        {
+            camForward = Camera.main.transform.up;
+            camForward.y = 0f;
+        }
         camForward.Normalize();
 
         Vector3 camRight = Camera.main.transform.right;
         camRight.y = 0f;
         camRight.Normalize();
 
-        // 根據攝影機的視角來決定實際移動的方向
         Vector3 dir = (camForward * v + camRight * h).normalized;
 
+        // ==========================================
+        // ★ 核心修復：加入重力與下樓梯的拉力
+        // ==========================================
+        if (_cc.isGrounded)
+        {
+            // 當踩在地上或台階上時，給予一個輕微向下的力量
+            // 這能確保玩家在「下樓梯」時，會被死死吸住地板跟著往下走
+            _velocityY = -2f;
+        }
+        else
+        {
+            // 如果真的懸空了，就執行自由落體
+            _velocityY += _gravity * Time.deltaTime;
+        }
+
+        // 將你的水平移動與垂直重力結合
+        Vector3 moveVelocity = dir * moveSpeed;
+        moveVelocity.y = _velocityY;
+
+        // 使用帶有重力的速度來移動
+        _cc.Move(moveVelocity * Time.deltaTime);
+
+        // 轉向邏輯維持不變
         if (dir.magnitude > 0.1f)
         {
-            // 移動
-            _cc.Move(dir * moveSpeed * Time.deltaTime);
-
-            // 面向
             Quaternion target = Quaternion.LookRotation(dir, Vector3.up);
-            transform.rotation = Quaternion.RotateTowards(
-                transform.rotation, target, rotationSpeed * Time.deltaTime);
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, target, rotationSpeed * Time.deltaTime);
         }
     }
 

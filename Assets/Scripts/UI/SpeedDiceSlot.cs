@@ -25,8 +25,8 @@ public class SpeedDiceSlot : MonoBehaviour, IPointerClickHandler, IPointerEnterH
         AssignedCard = null; TargetSlot = null; TargetUnit = null; IsResolved = false;
         _ui = FindAnyObjectByType<BattleUIController>();
 
-        if (speedText) speedText.text = owner.staggerTurnsLeft > 0 ? "X" : speed.ToString();
         if (cardThumbnail) cardThumbnail.gameObject.SetActive(false);
+        if (speedText != null) speedText.text = Speed.ToString();
     }
 
     public void OnPointerEnter(PointerEventData eventData)
@@ -42,7 +42,6 @@ public class SpeedDiceSlot : MonoBehaviour, IPointerClickHandler, IPointerEnterH
 
     public void OnPointerClick(PointerEventData eventData)
     {
-        if (Owner.staggerTurnsLeft > 0) return;
 
         if (eventData.button == PointerEventData.InputButton.Right)
         {

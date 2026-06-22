@@ -17,6 +17,7 @@ public class DiceData
     public DiceType type;
     public int minVal;
     public int maxVal;
+    public int effectValue;
 
     // ★ 補回遺失的 Roll() 擲骰功能
     public int Roll()

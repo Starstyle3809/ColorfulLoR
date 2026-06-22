@@ -13,10 +13,11 @@ MonoBehaviour:
   m_Name: "\u6025\u6551"
   m_EditorClassIdentifier: Assembly-CSharp::CardData
   cardName: "\u6025\u6551"
-  artwork: {fileID: 21300000, guid: 0a6a579d64fa59140b3fb5fcace9d4a7, type: 3}
+  artwork: {fileID: 605236142, guid: 8de2a8ca58d8f1b41908e112b3f6bbd3, type: 3}
   description: 
   cost: 1
   diceList:
   - type: 4
     minVal: 2
     maxVal: 4
+    effectValue: 1

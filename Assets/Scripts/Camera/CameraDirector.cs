@@ -9,6 +9,7 @@ using System.Collections;
 public class CameraDirector : MonoBehaviour
 {
     public static CameraDirector Instance { get; private set; }
+    private float _defaultOrthoSize; // ★ 新增：紀錄 2D 攝影機的預設尺寸
 
     [Header("三台虛擬攝影機")]
     public CinemachineCamera vcamExplore;
@@ -28,27 +29,52 @@ public class CameraDirector : MonoBehaviour
     private CinemachineBrain _brain;
     // 紀錄特寫鏡頭預設的視野大小
     private float _defaultClashFOV;
+    private bool _isPunching = false;
+
 
     private void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
 
-        // 尋找主攝影機上的 CinemachineBrain
-        if (Camera.main != null)
-        {
-            _brain = Camera.main.GetComponent<CinemachineBrain>();
-        }
+        if (Camera.main != null) _brain = Camera.main.GetComponent<CinemachineBrain>();
 
         if (vcamBattleClash != null)
         {
             _defaultClashFOV = vcamBattleClash.Lens.FieldOfView;
+            _defaultOrthoSize = vcamBattleClash.Lens.OrthographicSize; // ★ 抓取 2D 尺寸
         }
 
-        // 如果沒有手動綁定震動源，嘗試自動抓取
-        if (impulseSource == null)
+        if (impulseSource == null) impulseSource = GetComponent<CinemachineImpulseSource>();
+    }
+    private void Update()
+    {
+        // 只有在「拼點特寫鏡頭啟動」且「沒有在播放打擊震動」的時候，才進行動態縮放
+        if (vcamBattleClash.Priority == PRIORITY_ACTIVE && !_isPunching)
         {
-            impulseSource = GetComponent<CinemachineImpulseSource>();
+            if (clashTargetGroup != null && clashTargetGroup.Targets.Count >= 2)
+            {
+                Transform t1 = clashTargetGroup.Targets[0].Object;
+                Transform t2 = clashTargetGroup.Targets[1].Object;
+
+                if (t1 != null && t2 != null)
+                {
+                    // 1. 計算雙方目前的距離
+                    float dist = Vector3.Distance(t1.position, t2.position);
+
+                    // 2. 核心公式：基礎大小 + (距離 * 縮放比例)
+                    // 距離越遠，Size 越大。最小限制在 3.5 (特寫)，最大限制在 7.5 (遠景)
+                    float targetSize = Mathf.Clamp(3.5f + (dist * 0.3f), 3.5f, 7.5f);
+
+                    // 3. 平滑過渡 (Lerp) 讓鏡頭縮放看起來像電影運鏡
+                    _defaultOrthoSize = Mathf.Lerp(_defaultOrthoSize, targetSize, Time.deltaTime * 5f);
+
+                    // 4. 套用到攝影機上
+                    var lens = vcamBattleClash.Lens;
+                    lens.OrthographicSize = _defaultOrthoSize;
+                    vcamBattleClash.Lens = lens;
+                }
+            }
         }
     }
 
@@ -108,34 +134,39 @@ public class CameraDirector : MonoBehaviour
     }
 
     // 利用 FOV 瞬間縮小再放大的「頓挫感」，做出《廢墟圖書館》拼點時的強烈視覺張力
+    // ★ 修正：自動判斷當前是 3D 還是 2D 攝影機，給予對應的 Hitstop 縮放
     private IEnumerator FOVPunchRoutine(float force)
     {
-        // 根據攻擊力道決定鏡頭要拉多近
-        float punchAmount = 8f * force;
-        float targetFOV = _defaultClashFOV - punchAmount;
-
-        // 瞬間把鏡頭拉近 (Hit)
+        _isPunching = true;
         var lens = vcamBattleClash.Lens;
-        lens.FieldOfView = targetFOV;
+        bool isOrtho = lens.Orthographic;
+
+        // 計算縮放量 (FOV 數值越大視野越廣；Ortho Size 數值越大視野越廣)
+        float targetFOV = _defaultClashFOV - (8f * force);
+        float targetOrtho = _defaultOrthoSize - (0.8f * force); // 2D 縮放比例
+
+        if (isOrtho) lens.OrthographicSize = targetOrtho;
+        else lens.FieldOfView = targetFOV;
         vcamBattleClash.Lens = lens;
 
-        // 頓幀維持一小段時間 (Hitstop 卡肉感)
         yield return new WaitForSeconds(0.05f);
 
-        // 迅速但平滑地恢復原本的視角
         float elapsed = 0f;
         float recoverTime = 0.15f;
         while (elapsed < recoverTime)
         {
             elapsed += Time.deltaTime;
-            lens.FieldOfView = Mathf.Lerp(targetFOV, _defaultClashFOV, elapsed / recoverTime);
+            if (isOrtho) lens.OrthographicSize = Mathf.Lerp(targetOrtho, _defaultOrthoSize, elapsed / recoverTime);
+            else lens.FieldOfView = Mathf.Lerp(targetFOV, _defaultClashFOV, elapsed / recoverTime);
+
             vcamBattleClash.Lens = lens;
             yield return null;
         }
 
-        // 確保精準復原
-        lens.FieldOfView = _defaultClashFOV;
+        if (isOrtho) lens.OrthographicSize = _defaultOrthoSize;
+        else lens.FieldOfView = _defaultClashFOV;
         vcamBattleClash.Lens = lens;
+        _isPunching = false;
     }
 
     private void SetPriority(CinemachineCamera vcam, int priority)
