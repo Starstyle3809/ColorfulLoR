@@ -31,13 +31,13 @@ public class SpeedDiceSlot : MonoBehaviour, IPointerClickHandler, IPointerEnterH
 
     public void OnPointerEnter(PointerEventData eventData)
     {
-        if (AssignedCard != null && _ui != null)
-            _ui.ShowHoverInfo(AssignedCard, GetComponent<RectTransform>(), IsPlayerSlot);
+        if (_ui != null)
+            _ui.ShowHoverInfo(this);
     }
 
     public void OnPointerExit(PointerEventData eventData)
     {
-        if (_ui != null) _ui.HideHoverInfo(IsPlayerSlot);
+        if (_ui != null) _ui.HideHoverInfo();
     }
 
     public void OnPointerClick(PointerEventData eventData)

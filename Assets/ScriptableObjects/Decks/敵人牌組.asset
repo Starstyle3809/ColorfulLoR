@@ -14,9 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DeckData
   deckName: "\u6575\u4EBA\u724C\u7D44"
   cards:
-  - {fileID: 11400000, guid: 882897782487e3c47b172d064e00c3bd, type: 2}
-  - {fileID: 11400000, guid: 882897782487e3c47b172d064e00c3bd, type: 2}
-  - {fileID: 11400000, guid: 882897782487e3c47b172d064e00c3bd, type: 2}
+  - {fileID: 11400000, guid: 50a2272feb68b8040ac3a7a37829c72e, type: 2}
   - {fileID: 11400000, guid: 50a2272feb68b8040ac3a7a37829c72e, type: 2}
   - {fileID: 11400000, guid: 50a2272feb68b8040ac3a7a37829c72e, type: 2}
   - {fileID: 11400000, guid: 6ed6f4a0e54ffdd419e55c724cc5e6f3, type: 2}
@@ -24,3 +22,5 @@ MonoBehaviour:
   - {fileID: 11400000, guid: dfa73db9af75e874aa3a1ea802f50ab1, type: 2}
   - {fileID: 11400000, guid: dfa73db9af75e874aa3a1ea802f50ab1, type: 2}
   - {fileID: 11400000, guid: fae246c31e7604b4180b62ed41219e11, type: 2}
+  - {fileID: 11400000, guid: fae246c31e7604b4180b62ed41219e11, type: 2}
+  - {fileID: 11400000, guid: 882897782487e3c47b172d064e00c3bd, type: 2}

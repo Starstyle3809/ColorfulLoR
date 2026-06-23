@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
+using System.Text.RegularExpressions;
 
 public class BattleUIController : MonoBehaviour
 {
@@ -13,25 +14,33 @@ public class BattleUIController : MonoBehaviour
     public RectTransform enemySlotsGroup;
 
     [Header("動態位置偏移設定 (絕對世界座標)")]
-    public Vector3 playerHpOffset = new Vector3(0, -1.5f, 0); 
-    public Vector3 enemyHpOffset = new Vector3(0, -1.5f, 0);  
-
+    public Vector3 playerHpOffset = new Vector3(0, -1.5f, 0);
+    public Vector3 enemyHpOffset = new Vector3(0, -1.5f, 0);
     public Vector3 playerSlotsOffset = new Vector3(-2.5f, 3.5f, 0f);
     public Vector3 enemySlotsOffset = new Vector3(2.5f, 3.5f, 0f);
 
-    [Header("狀態 UI (確保 Slider 已拉入)")]
+    [Header("狀態 UI")]
     public TextMeshProUGUI playerHPText;
     public CustomHPBar playerHPBar;
-    public TextMeshProUGUI playerStaggerText;
-    public Slider playerStaggerSlider;
-    public TextMeshProUGUI playerBuffText;
-
+    public RectTransform playerBuffContainer;
 
     public TextMeshProUGUI enemyHPText;
     public CustomHPBar enemyHPBar;
-    public TextMeshProUGUI enemyStaggerText;
-    public Slider enemyStaggerSlider;
-    public TextMeshProUGUI enemyBuffText;
+    public RectTransform enemyBuffContainer;
+
+    // ★ 已經把死板的護盾變數全部刪除，讓介面回歸乾淨！
+
+    [System.Serializable]
+    public struct BuffSpriteMapping
+    {
+        public string buffNameKeyword;
+        public Sprite icon;
+    }
+
+    [Header("Buff 圖示系統")]
+    public GameObject buffIconPrefab;
+    [Tooltip("在這裡設定 Buff 關鍵字對應的圖片")]
+    public List<BuffSpriteMapping> buffSpriteDatabase;
 
     [Header("預製物與面板")]
     public GameObject speedDiceSlotPrefab;
@@ -65,9 +74,7 @@ public class BattleUIController : MonoBehaviour
         public RectTransform slotsGroup;
         public TextMeshProUGUI hpText;
         public CustomHPBar hpBar;
-        public TextMeshProUGUI staggerText;
-        public Slider staggerSlider;
-        public TextMeshProUGUI buffText;
+        public RectTransform buffContainer;
     }
     private Dictionary<BattleUnit, EnemyUI> _enemyUIs = new Dictionary<BattleUnit, EnemyUI>();
 
@@ -77,7 +84,6 @@ public class BattleUIController : MonoBehaviour
         _mainCamera = Camera.main;
 
         if (_bm == null) return;
-
         _bm.OnBattleLog += AppendLog;
         _bm.OnStateChanged += OnStateChanged;
         _bm.OnRoundStart += OnRoundStart;
@@ -109,18 +115,6 @@ public class BattleUIController : MonoBehaviour
 
         if (playerTooltipPanel) playerTooltipPanel.SetActive(false);
         if (enemyTooltipPanel) enemyTooltipPanel.SetActive(false);
-
-        if (handContainer != null)
-        {
-            HorizontalLayoutGroup hlg = handContainer.GetComponent<HorizontalLayoutGroup>();
-            if (hlg != null)
-            {
-                hlg.childControlWidth = false;
-                hlg.childControlHeight = false;
-                hlg.childForceExpandWidth = false;
-                hlg.childForceExpandHeight = false;
-            }
-        }
     }
 
     private string GetPathToChild(Transform child, Transform root)
@@ -152,9 +146,7 @@ public class BattleUIController : MonoBehaviour
         firstUI.slotsGroup = enemySlotsGroup;
         firstUI.hpText = enemyHPText;
         firstUI.hpBar = enemyHPBar;
-        firstUI.staggerText = enemyStaggerText;
-        firstUI.staggerSlider = enemyStaggerSlider;
-        firstUI.buffText = enemyBuffText;
+        firstUI.buffContainer = enemyBuffContainer;
         _enemyUIs[_bm.Enemies[0]] = firstUI;
 
         if (enemyHUD) enemyHUD.gameObject.SetActive(true);
@@ -172,9 +164,7 @@ public class BattleUIController : MonoBehaviour
 
                 if (enemyHPText != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyHPText.transform, enemyHUD)); if (t) newUI.hpText = t.GetComponent<TextMeshProUGUI>(); }
                 if (enemyHPBar != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyHPBar.transform, enemyHUD)); if (t) newUI.hpBar = t.GetComponent<CustomHPBar>(); }
-                if (enemyStaggerText != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyStaggerText.transform, enemyHUD)); if (t) newUI.staggerText = t.GetComponent<TextMeshProUGUI>(); }
-                if (enemyStaggerSlider != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyStaggerSlider.transform, enemyHUD)); if (t) newUI.staggerSlider = t.GetComponent<Slider>(); }
-                if (enemyBuffText != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyBuffText.transform, enemyHUD)); if (t) newUI.buffText = t.GetComponent<TextMeshProUGUI>(); }
+                if (enemyBuffContainer != null) { Transform t = newUI.hudRect.Find(GetPathToChild(enemyBuffContainer.transform, enemyHUD)); if (t) newUI.buffContainer = t.GetComponent<RectTransform>(); }
             }
 
             if (enemySlotsGroup != null)
@@ -203,10 +193,20 @@ public class BattleUIController : MonoBehaviour
                 playerSlotsGroup.position = slotPos;
             }
 
-            // ★ 文字只顯示純數字
             if (playerHPText) playerHPText.text = _bm.Player.CurrentHP.ToString();
             if (playerHPBar) playerHPBar.UpdateHP(_bm.Player.CurrentHP);
-            if (playerBuffText) playerBuffText.text = _bm.Player.activeBuffs.Count > 0 ? string.Join("\n", _bm.Player.activeBuffs) : "";
+
+            // ==============================================
+            // ★ 將護盾混入 Buff 清單一起顯示給玩家
+            // ==============================================
+            if (playerBuffContainer)
+            {
+                List<string> displayBuffs = new List<string>(_bm.Player.activeBuffs);
+                // 如果有護盾，就塞進名單的最前面！
+                if (_bm.Player.currentShield > 0) displayBuffs.Insert(0, $"護盾 {_bm.Player.currentShield}");
+
+                SyncBuffIcons(playerBuffContainer, displayBuffs);
+            }
         }
 
         for (int i = 0; i < _bm.Enemies.Count; i++)
@@ -230,18 +230,75 @@ public class BattleUIController : MonoBehaviour
                 sHp.z = 0;
                 eUI.hudRect.position = sHp;
 
-                // ★ 文字只顯示純數字
                 if (eUI.hpText) eUI.hpText.text = enemy.CurrentHP.ToString();
                 if (eUI.hpBar) eUI.hpBar.UpdateHP(enemy.CurrentHP);
-                if (eUI.buffText) eUI.buffText.text = enemy.activeBuffs.Count > 0 ? string.Join("\n", enemy.activeBuffs) : "";
+
+                // ==============================================
+                // ★ 將護盾混入 Buff 清單一起顯示給敵人
+                // ==============================================
+                if (eUI.buffContainer)
+                {
+                    List<string> displayBuffs = new List<string>(enemy.activeBuffs);
+                    if (enemy.currentShield > 0) displayBuffs.Insert(0, $"護盾 {enemy.currentShield}");
+
+                    SyncBuffIcons(eUI.buffContainer, displayBuffs);
+                }
             }
 
             if (eUI.slotsGroup != null)
             {
-                eUI.slotsGroup.gameObject.SetActive(true);
+                
                 Vector3 slotPos = _mainCamera.WorldToScreenPoint(enemy.transform.position + enemySlotsOffset);
                 slotPos.z = 0;
                 eUI.slotsGroup.position = slotPos;
+            }
+        }
+    }
+
+    private void SyncBuffIcons(RectTransform container, List<string> buffs)
+    {
+        if (container == null || buffIconPrefab == null || buffs == null) return;
+
+        while (container.childCount < buffs.Count)
+        {
+            Instantiate(buffIconPrefab, container);
+        }
+
+        for (int i = 0; i < container.childCount; i++)
+        {
+            Transform child = container.GetChild(i);
+
+            if (i < buffs.Count)
+            {
+                child.gameObject.SetActive(true);
+                Image img = child.GetComponent<Image>();
+                TextMeshProUGUI txt = child.GetComponentInChildren<TextMeshProUGUI>();
+
+                string currentBuff = buffs[i];
+
+                if (img != null)
+                {
+                    img.sprite = null;
+                    foreach (var mapping in buffSpriteDatabase)
+                    {
+                        if (currentBuff.Contains(mapping.buffNameKeyword))
+                        {
+                            img.sprite = mapping.icon;
+                            break;
+                        }
+                    }
+                }
+
+                if (txt != null)
+                {
+                    string num = Regex.Match(currentBuff, @"\d+").Value;
+                    txt.text = num;
+                    txt.gameObject.SetActive(!string.IsNullOrEmpty(num));
+                }
+            }
+            else
+            {
+                child.gameObject.SetActive(false);
             }
         }
     }
@@ -332,11 +389,7 @@ public class BattleUIController : MonoBehaviour
 
     private void OnStateChanged(BattleManager.BattleState state)
     {
-        if (state == BattleManager.BattleState.Setup)
-        {
-            InitEnemyUIs();
-        }
-
+        if (state == BattleManager.BattleState.Setup) InitEnemyUIs();
         if (startClashButton) startClashButton.interactable = (state == BattleManager.BattleState.AssignPhase);
 
         if (state == BattleManager.BattleState.ClashResolution)
@@ -371,26 +424,20 @@ public class BattleUIController : MonoBehaviour
         handContainer.gameObject.SetActive(true);
         foreach (Transform child in handContainer) Destroy(child.gameObject);
 
-        // 1. 複製一份玩家當前手牌的清單作為「可選擇卡牌」
         List<CardData> availableCards = new List<CardData>(_bm.Player.Hand);
 
-        // 2. 檢查所有我方行動槽，將已經裝填的卡牌從清單中扣除
         if (playerSlotsGroup != null)
         {
             foreach (Transform child in playerSlotsGroup)
             {
                 var s = child.GetComponent<SpeedDiceSlot>();
-
-                // 排除當前被點擊的 slot (s != slot)，這樣這顆槽原本裝著的卡牌才會顯示出來讓你換牌
                 if (s != null && s.AssignedCard != null && s != slot)
                 {
-                    // Remove 只會刪除找到的「第一個」相符物件，所以完美支援手牌中有重複卡片的情況
                     availableCards.Remove(s.AssignedCard);
                 }
             }
         }
 
-        // 3. 根據剩下的可用手牌生成按鈕 UI
         foreach (var card in availableCards)
         {
             var btn = Instantiate(cardButtonPrefab, handContainer);
@@ -469,14 +516,59 @@ public class BattleUIController : MonoBehaviour
         if (bgOverlay) bgOverlay.SetActive(false);
     }
 
-    public void ShowHoverInfo(CardData card, RectTransform slotRect, bool isPlayerSlot)
+    public void ShowHoverInfo(SpeedDiceSlot hoveredSlot)
     {
-        GameObject targetPanel = isPlayerSlot ? playerTooltipPanel : enemyTooltipPanel;
-        if (targetPanel == null) return;
+        if (hoveredSlot == null) return;
 
-        UpdateTooltipData(targetPanel, card);
-        targetPanel.SetActive(true);
-        targetPanel.transform.SetAsLastSibling();
+        // 1. 顯示被懸停的槽位「本身」裝填的卡牌
+        if (hoveredSlot.AssignedCard != null)
+        {
+            GameObject targetPanel = hoveredSlot.IsPlayerSlot ? playerTooltipPanel : enemyTooltipPanel;
+            if (targetPanel != null)
+            {
+                UpdateTooltipData(targetPanel, hoveredSlot.AssignedCard);
+                targetPanel.SetActive(true);
+                targetPanel.transform.SetAsLastSibling();
+            }
+        }
+
+        // 2. 神奇魔法：尋找是否有其他槽位「正瞄準著」這個槽位，如果有，一併顯示對方的卡牌！
+        SpeedDiceSlot targetingSlot = FindSlotTargeting(hoveredSlot);
+        if (targetingSlot != null && targetingSlot.AssignedCard != null)
+        {
+            // 對方該用哪個面板顯示 (如果我是玩家，瞄準我的就是敵人，所以用敵人的面板)
+            GameObject oppPanel = targetingSlot.IsPlayerSlot ? playerTooltipPanel : enemyTooltipPanel;
+            if (oppPanel != null)
+            {
+                UpdateTooltipData(oppPanel, targetingSlot.AssignedCard);
+                oppPanel.SetActive(true);
+                oppPanel.transform.SetAsLastSibling();
+            }
+        }
+    }
+
+    private SpeedDiceSlot FindSlotTargeting(SpeedDiceSlot target)
+    {
+        if (playerSlotsGroup != null)
+        {
+            foreach (Transform child in playerSlotsGroup)
+            {
+                var s = child.GetComponent<SpeedDiceSlot>();
+                if (s != null && s.TargetSlot == target) return s;
+            }
+        }
+        foreach (var eUI in _enemyUIs.Values)
+        {
+            if (eUI.slotsGroup != null)
+            {
+                foreach (Transform child in eUI.slotsGroup)
+                {
+                    var s = child.GetComponent<SpeedDiceSlot>();
+                    if (s != null && s.TargetSlot == target) return s;
+                }
+            }
+        }
+        return null;
     }
 
     private Transform FindChildRecursive(Transform parent, string childName)

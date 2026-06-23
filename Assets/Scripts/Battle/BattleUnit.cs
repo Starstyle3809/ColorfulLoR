@@ -64,6 +64,7 @@ public class BattleUnit : MonoBehaviour
     }
 
 
+
     public void Heal(int amount)
     {
         CurrentHP = Mathf.Min(maxHP, CurrentHP + amount);
